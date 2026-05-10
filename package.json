@@ -1,0 +1,41 @@
+{
+  "name": "pi-footer-fixed",
+  "version": "0.1.0",
+  "description": "Keep the Pi Agent editor cluster fixed at the bottom of the terminal.",
+  "type": "module",
+  "files": [
+    "src/**/*.ts",
+    "README.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "pi-package",
+    "pi",
+    "pi-coding-agent",
+    "extension",
+    "tui",
+    "fixed-editor"
+  ],
+  "license": "MIT",
+  "scripts": {
+    "check": "tsc --noEmit",
+    "smoke": "node --experimental-strip-types -e \"import('./src/index.ts').then(m=>{if(typeof m.default!=='function')throw new Error('missing default export')})\"",
+    "test": "node --experimental-strip-types --test tests/**/*.test.ts",
+    "validate": "npm run check && npm run smoke && npm test"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "^0.74.0",
+    "@earendil-works/pi-tui": "^0.74.0"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "^0.74.0",
+    "@earendil-works/pi-tui": "^0.74.0",
+    "@types/node": "^24.3.0",
+    "typescript": "^5.7.3"
+  },
+  "pi": {
+    "extensions": [
+      "./src/index.ts"
+    ]
+  }
+}
