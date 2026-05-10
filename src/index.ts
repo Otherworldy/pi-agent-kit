@@ -21,6 +21,12 @@ const STATUS_WIDGET_ID = "footer-fixed-status";
 const SECONDARY_WIDGET_ID = "footer-fixed-secondary";
 const DEFAULT_SCROLL_UP_SHORTCUT = "super+up";
 const DEFAULT_SCROLL_DOWN_SHORTCUT = "super+down";
+const MAX_INSTALL_RETRY_ATTEMPTS = 5;
+const INSTALL_RETRY_DELAYS_MS = [0, 16, 50, 100, 250] as const;
+const FOOTER_FIXED_EDITOR_FACTORY = Symbol("pi-footer-fixed.editorFactory");
+
+type EditorFactory = (tui: any, theme: any, keybindings: any) => any;
+type FooterFixedEditorFactory = EditorFactory & { [FOOTER_FIXED_EDITOR_FACTORY]?: true };
 
 let config: FooterFixedConfig = {
   fixedEditor: true,
@@ -66,6 +72,19 @@ function isEditorShellActive(container: any, editor: any): boolean {
   return getSingleContainerChild(container) === editor;
 }
 
+function hasVisibleOverlay(tui: any): boolean {
+  if (typeof tui?.hasOverlay === "function") {
+    try {
+      if (tui.hasOverlay()) return true;
+    } catch {
+      return false;
+    }
+  }
+
+  const overlayStack = Reflect.get(tui ?? {}, "overlayStack");
+  return Array.isArray(overlayStack) && overlayStack.some((entry) => entry && entry.hidden !== true);
+}
+
 function copyTextToClipboard(ctx: any, text: string): void {
   void copyToClipboard(text).then(
     () => notify(ctx, "Copied selection", "info"),
@@ -77,12 +96,18 @@ export default function footerFixedPlugin(pi: ExtensionAPI) {
   let tuiRef: any = null;
   let currentEditor: any = null;
   let footerDataRef: ReadonlyFooterDataProvider | null = null;
-  let originalEditorFactory: ((tui: any, theme: any, keybindings: any) => any) | undefined;
+  let originalEditorFactory: EditorFactory | undefined;
+  let wrappedEditorFactory: FooterFixedEditorFactory | undefined;
   let fixedEditorCompositor: TerminalSplitCompositor | null = null;
   let fixedStatusContainer: any = null;
   let fixedEditorContainer: any = null;
   let fixedWidgetContainerAbove: any = null;
   let fixedWidgetContainerBelow: any = null;
+  let needsFixedEditorReinstall = false;
+  let installRetryQueued = false;
+  let installRetryAttempts = 0;
+  let installRetryTimer: ReturnType<typeof setTimeout> | null = null;
+  const installStabilizationTimers = new Set<ReturnType<typeof setTimeout>>();
 
   function teardownFixedEditorCompositor(options?: { resetExtendedKeyboardModes?: boolean }) {
     const hadCompositor = fixedEditorCompositor !== null;
@@ -102,23 +127,28 @@ export default function footerFixedPlugin(pi: ExtensionAPI) {
     fixedWidgetContainerBelow = null;
   }
 
-  function installFixedEditorCompositor(ctx: any, tui: any) {
-    teardownFixedEditorCompositor();
-
-    if (!ctx?.hasUI || !config.fixedEditor) return;
+  function installFixedEditorCompositor(ctx: any, tui: any): boolean {
+    if (!ctx?.hasUI || !config.fixedEditor) return false;
     if (!tui?.terminal || typeof tui.terminal.write !== "function") {
+      teardownFixedEditorCompositor();
       throw new Error("[pi-footer-fixed] Fixed editor compositor could not find tui.terminal.write()");
     }
-    if (!currentEditor) {
-      throw new Error("[pi-footer-fixed] Fixed editor compositor expected the editor to be installed first");
-    }
+    if (!currentEditor) return false;
 
     const editorContainerMatch = findContainerWithChild(tui, currentEditor);
     if (!editorContainerMatch) {
-      throw new Error("[pi-footer-fixed] Fixed editor compositor could not find the editor container in TUI children");
+      needsFixedEditorReinstall = true;
+      if (hasVisibleOverlay(tui)) return false;
+
+      teardownFixedEditorCompositor();
+      return false;
     }
 
+    teardownFixedEditorCompositor();
+
     const tuiChildren = Array.isArray(tui.children) ? tui.children : [];
+    needsFixedEditorReinstall = false;
+    installRetryAttempts = 0;
     fixedEditorContainer = editorContainerMatch.container;
     const statusContainerCandidate = tuiChildren[editorContainerMatch.index - 2] ?? null;
     fixedStatusContainer = statusContainerCandidate && typeof statusContainerCandidate.render === "function"
@@ -138,7 +168,14 @@ export default function footerFixedPlugin(pi: ExtensionAPI) {
       },
       onCopySelection: (text) => copyTextToClipboard(ctx, text),
       getShowHardwareCursor: () => typeof tui.getShowHardwareCursor === "function" && tui.getShowHardwareCursor(),
-      shouldBypassFixedCluster: () => !isEditorShellActive(fixedEditorContainer, currentEditor),
+      shouldBypassFixedCluster: () => {
+        const bypass = !isEditorShellActive(fixedEditorContainer, currentEditor);
+        if (bypass && ctx.ui.getEditorComponent?.() !== wrappedEditorFactory) {
+          needsFixedEditorReinstall = true;
+          queueInstallRetry(ctx);
+        }
+        return bypass;
+      },
       renderCluster: (width, terminalRows) => {
         const statusContainerLines = fixedStatusContainer
           ? compositor.renderHidden(fixedStatusContainer, width).filter((line) => visibleWidth(line) > 0)
@@ -163,6 +200,7 @@ export default function footerFixedPlugin(pi: ExtensionAPI) {
     if (fixedWidgetContainerBelow?.render) compositor.hideRenderable(fixedWidgetContainerBelow);
     compositor.install();
     tui.requestRender(true);
+    return true;
   }
 
   function installFallbackWidgets(ctx: any) {
@@ -188,8 +226,8 @@ export default function footerFixedPlugin(pi: ExtensionAPI) {
     ctx.ui.setWidget(SECONDARY_WIDGET_ID, undefined);
   }
 
-  function wrapEditorFactory(ctx: any, factory: ((tui: any, theme: any, keybindings: any) => any) | undefined) {
-    return (tui: any, theme: any, keybindings: any) => {
+  function wrapEditorFactory(ctx: any, factory: EditorFactory | undefined): FooterFixedEditorFactory {
+    const wrapped = ((tui: any, theme: any, keybindings: any) => {
       const editor = factory
         ? factory(tui, theme, keybindings)
         : new CustomEditor(tui, theme, keybindings);
@@ -215,23 +253,119 @@ export default function footerFixedPlugin(pi: ExtensionAPI) {
       }
 
       return editor;
-    };
+    }) as FooterFixedEditorFactory;
+
+    wrapped[FOOTER_FIXED_EDITOR_FACTORY] = true;
+    return wrapped;
+  }
+
+  function isCurrentEditorMounted(): boolean {
+    return Boolean(tuiRef && currentEditor && findContainerWithChild(tuiRef, currentEditor));
+  }
+
+  function ensureEditorFactoryInstalled(ctx: any): void {
+    const existingFactory = ctx.ui.getEditorComponent?.() as FooterFixedEditorFactory | undefined;
+    if (existingFactory !== undefined && existingFactory[FOOTER_FIXED_EDITOR_FACTORY] !== true) {
+      originalEditorFactory = existingFactory;
+      wrappedEditorFactory = undefined;
+    }
+
+    wrappedEditorFactory ??= wrapEditorFactory(ctx, originalEditorFactory);
+    if (existingFactory !== wrappedEditorFactory || !isCurrentEditorMounted()) {
+      ctx.ui.setEditorComponent(wrappedEditorFactory);
+    }
+  }
+
+  function queueInstallRetry(ctx: any): void {
+    if (installRetryQueued || installRetryAttempts >= MAX_INSTALL_RETRY_ATTEMPTS) return;
+    installRetryQueued = true;
+    const delay = INSTALL_RETRY_DELAYS_MS[Math.min(installRetryAttempts, INSTALL_RETRY_DELAYS_MS.length - 1)] ?? 0;
+    installRetryAttempts += 1;
+    installRetryTimer = setTimeout(() => {
+      installRetryQueued = false;
+      installRetryTimer = null;
+      reinstallFixedEditor(ctx);
+    }, delay);
+  }
+
+  function queueInstallStabilization(ctx: any): void {
+    for (const delay of INSTALL_RETRY_DELAYS_MS) {
+      const timer = setTimeout(() => {
+        installStabilizationTimers.delete(timer);
+        reinstallFixedEditor(ctx);
+      }, delay);
+      installStabilizationTimers.add(timer);
+    }
+  }
+
+  function clearInstallTimers(): void {
+    if (installRetryTimer) {
+      clearTimeout(installRetryTimer);
+      installRetryTimer = null;
+    }
+    installRetryQueued = false;
+    for (const timer of installStabilizationTimers) {
+      clearTimeout(timer);
+    }
+    installStabilizationTimers.clear();
   }
 
   function installWhenTuiReady(ctx: any, tui: any) {
     queueMicrotask(() => {
-      if (!config.fixedEditor || !currentEditor) return;
+      if (!config.fixedEditor) return;
+      if (!currentEditor) {
+        needsFixedEditorReinstall = true;
+        queueInstallRetry(ctx);
+        return;
+      }
 
       try {
-        installFixedEditorCompositor(ctx, tui);
+        const installed = installFixedEditorCompositor(ctx, tui);
+        if (!installed && needsFixedEditorReinstall && !hasVisibleOverlay(tui)) {
+          queueInstallRetry(ctx);
+        }
       } catch (error) {
         console.debug("[pi-footer-fixed] Fixed editor install failed:", error);
         notify(ctx, "pi-footer-fixed: fixed editor install failed; using normal widgets", "warning");
-        config.fixedEditor = false;
         teardownFixedEditorCompositor();
         installFallbackWidgets(ctx);
       }
     });
+  }
+
+  function reinstallFixedEditor(ctx: any, options: { force?: boolean } = {}): void {
+    if (!config.fixedEditor) return;
+
+    if (!tuiRef) {
+      needsFixedEditorReinstall = true;
+      queueInstallRetry(ctx);
+      return;
+    }
+
+    if (hasVisibleOverlay(tuiRef)) {
+      needsFixedEditorReinstall = true;
+      fixedEditorCompositor?.requestRepaint();
+      tuiRef.requestRender?.();
+      return;
+    }
+
+    ensureEditorFactoryInstalled(ctx);
+
+    if (!currentEditor) {
+      needsFixedEditorReinstall = true;
+      queueInstallRetry(ctx);
+      return;
+    }
+
+    if (!options.force && fixedEditorCompositor && isCurrentEditorMounted() && ctx.ui.getEditorComponent?.() === wrappedEditorFactory) {
+      needsFixedEditorReinstall = false;
+      installRetryAttempts = 0;
+      fixedEditorCompositor.requestRepaint();
+      return;
+    }
+
+    needsFixedEditorReinstall = false;
+    installWhenTuiReady(ctx, tuiRef);
   }
 
   function setupEditor(ctx: any) {
@@ -240,17 +374,12 @@ export default function footerFixedPlugin(pi: ExtensionAPI) {
     teardownFixedEditorCompositor();
     clearFallbackWidgets(ctx);
 
-    const existingFactory = ctx.ui.getEditorComponent?.();
-    if (existingFactory !== undefined && existingFactory !== originalEditorFactory) {
-      originalEditorFactory = existingFactory;
-    }
-
-    ctx.ui.setEditorComponent(wrapEditorFactory(ctx, originalEditorFactory));
+    ensureEditorFactoryInstalled(ctx);
 
     if (!config.fixedEditor) {
       installFallbackWidgets(ctx);
-    } else if (tuiRef && currentEditor) {
-      installWhenTuiReady(ctx, tuiRef);
+    } else {
+      reinstallFixedEditor(ctx);
     }
   }
 
@@ -263,8 +392,8 @@ export default function footerFixedPlugin(pi: ExtensionAPI) {
         tui.requestRender();
       });
 
-      if (config.fixedEditor && currentEditor) {
-        installWhenTuiReady(ctx, tui);
+      if (config.fixedEditor) {
+        reinstallFixedEditor(ctx);
       }
 
       return {
@@ -287,8 +416,11 @@ export default function footerFixedPlugin(pi: ExtensionAPI) {
     config[key] = value;
     if (key === "fixedEditor") {
       setupEditor(ctx);
-    } else if (config.fixedEditor && tuiRef && currentEditor) {
-      installWhenTuiReady(ctx, tuiRef);
+    } else if (key === "mouseScroll") {
+      reinstallFixedEditor(ctx, { force: true });
+    } else {
+      fixedEditorCompositor?.requestRepaint();
+      tuiRef?.requestRender?.();
     }
 
     const persisted = writeFooterFixedSetting(ctx.cwd, { [key]: value });
@@ -304,18 +436,32 @@ export default function footerFixedPlugin(pi: ExtensionAPI) {
     }
 
     await showFooterFixedSettingsPanel(ctx, config, (key, value) => applySetting(ctx, key, value));
+
+    if (needsFixedEditorReinstall) {
+      reinstallFixedEditor(ctx);
+    }
   }
 
   pi.on("session_start", async (_event, ctx) => {
     config = parseFooterFixedConfig(readSettings(ctx.cwd));
+    needsFixedEditorReinstall = false;
+    installRetryAttempts = 0;
+    clearInstallTimers();
+    currentEditor = null;
+    tuiRef = null;
+    footerDataRef = null;
 
     if (!ctx.hasUI) return;
 
     installFooterCapture(ctx);
     setupEditor(ctx);
+    reinstallFixedEditor(ctx);
+    queueInstallStabilization(ctx);
   });
 
   pi.on("session_shutdown", async () => {
+    installRetryAttempts = 0;
+    clearInstallTimers();
     teardownFixedEditorCompositor({ resetExtendedKeyboardModes: true });
     tuiRef = null;
     currentEditor = null;
