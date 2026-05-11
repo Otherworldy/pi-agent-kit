@@ -230,7 +230,7 @@ test("plugin exports a default factory and registers lifecycle hooks plus comman
   assert.equal(typeof footerFixedPlugin, "function");
   footerFixedPlugin(api as never);
 
-  assert.deepEqual(events, ["session_start", "session_shutdown"]);
+  assert.deepEqual(events, ["session_start", "agent_end", "session_shutdown"]);
   assert.deepEqual(commands, ["footer-fixed"]);
 });
 

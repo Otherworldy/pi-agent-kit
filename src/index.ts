@@ -15,6 +15,7 @@ import {
 } from "./config.ts";
 import { renderFixedEditorCluster } from "./fixed-editor/cluster.ts";
 import { emergencyTerminalModeReset, TerminalSplitCompositor } from "./fixed-editor/terminal-split.ts";
+import { notifyTaskCompleteWindows, shouldNotifyTaskCompletion } from "./notify.ts";
 import { showFooterFixedSettingsPanel } from "./settings-panel.ts";
 
 const STATUS_WIDGET_ID = "footer-fixed-status";
@@ -457,6 +458,12 @@ export default function footerFixedPlugin(pi: ExtensionAPI) {
     setupEditor(ctx);
     reinstallFixedEditor(ctx);
     queueInstallStabilization(ctx);
+  });
+
+  pi.on("agent_end", async (_event, ctx) => {
+    if (shouldNotifyTaskCompletion(ctx)) {
+      notifyTaskCompleteWindows();
+    }
   });
 
   pi.on("session_shutdown", async () => {
