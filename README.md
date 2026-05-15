@@ -12,6 +12,12 @@ npm run validate
 pi install -l D:/Study/Code/Node/pi-footer-fixed
 ```
 
+## Task completion notification
+
+On native Windows, and on Windows 11 WSL with `powershell.exe`/WSL interop available, the extension sends a Chinese toast notification when the main interactive Pi Agent finishes a task and waits for input.
+
+Subagent processes are skipped via the `PI_SUBAGENT_*` environment markers used by `pi-subagents`, with a JSON print-mode fallback guard. The notification can be disabled in `/footer-fixed` via `Task completion notification`. If no toast appears in WSL, check `command -v powershell.exe` and Windows notification / Do Not Disturb settings.
+
 ## Settings UI
 
 ```text
@@ -23,6 +29,8 @@ Opens a settings panel with:
 - Fixed editor
 - Mouse scroll
 - Extension status
+- Task completion notification
+- Collapse plugin outputs
 
 ## Settings file
 
@@ -35,10 +43,14 @@ Project: `.pi/settings.json`
   "footerFixed": {
     "fixedEditor": true,
     "mouseScroll": true,
-    "showExtensionStatus": true
+    "showExtensionStatus": true,
+    "taskCompletionNotification": true,
+    "collapsePluginOutputs": true
   }
 }
 ```
+
+`collapsePluginOutputs` starts Pi tool/plugin output rows in collapsed mode; Pi's normal tool-output shortcut (Ctrl+O by default) can still toggle them.
 
 `powerline.fixedEditor` and `powerline.mouseScroll` are also read as compatibility aliases.
 

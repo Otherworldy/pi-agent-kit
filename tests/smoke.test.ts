@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { initTheme } from "@earendil-works/pi-coding-agent";
@@ -43,6 +43,7 @@ function createTempSettings() {
       fixedEditor: true,
       mouseScroll: true,
       showExtensionStatus: true,
+      taskCompletionNotification: true,
     },
   }), "utf-8");
 
@@ -317,6 +318,21 @@ test("settings overlay changes defer fixed-editor reinstall without warning fall
 
     assert.deepEqual(harness.notifies, []);
     assert.equal(harness.widgetCalls.some((call) => call.content !== undefined), false);
+  });
+});
+
+test("settings overlay persists task completion notification toggle", async () => {
+  await withTempSettings(async ({ cwd }) => {
+    const harness = createHarness(cwd);
+    await harness.startWithMountedEditor();
+
+    const { promise, state } = await harness.openSettings();
+    state.panel.settingsList.onChange("taskCompletionNotification", "false");
+    state.done();
+    await promise;
+
+    const settings = JSON.parse(readFileSync(join(cwd, ".pi", "settings.json"), "utf-8"));
+    assert.equal(settings.footerFixed.taskCompletionNotification, false);
   });
 });
 

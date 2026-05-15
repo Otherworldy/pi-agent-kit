@@ -6,12 +6,14 @@ export interface FooterFixedConfig {
   fixedEditor: boolean;
   mouseScroll: boolean;
   showExtensionStatus: boolean;
+  taskCompletionNotification: boolean;
 }
 
 const DEFAULT_CONFIG: FooterFixedConfig = {
   fixedEditor: true,
   mouseScroll: true,
   showExtensionStatus: true,
+  taskCompletionNotification: true,
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -98,6 +100,8 @@ export function parseFooterFixedConfig(settings: Record<string, unknown>): Foote
       ?? DEFAULT_CONFIG.mouseScroll,
     showExtensionStatus: boolFromObject(footerFixed, "showExtensionStatus")
       ?? DEFAULT_CONFIG.showExtensionStatus,
+    taskCompletionNotification: boolFromObject(footerFixed, "taskCompletionNotification")
+      ?? DEFAULT_CONFIG.taskCompletionNotification,
   };
 }
 

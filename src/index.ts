@@ -33,6 +33,7 @@ let config: FooterFixedConfig = {
   fixedEditor: true,
   mouseScroll: true,
   showExtensionStatus: true,
+  taskCompletionNotification: true,
 };
 
 function notify(ctx: any, message: string, type: "info" | "warning" | "error" = "info"): void {
@@ -419,7 +420,7 @@ export default function footerFixedPlugin(pi: ExtensionAPI) {
       setupEditor(ctx);
     } else if (key === "mouseScroll") {
       reinstallFixedEditor(ctx, { force: true });
-    } else {
+    } else if (key === "showExtensionStatus") {
       fixedEditorCompositor?.requestRepaint();
       tuiRef?.requestRender?.();
     }
@@ -461,7 +462,7 @@ export default function footerFixedPlugin(pi: ExtensionAPI) {
   });
 
   pi.on("agent_end", async (_event, ctx) => {
-    if (shouldNotifyTaskCompletion(ctx)) {
+    if (config.taskCompletionNotification && shouldNotifyTaskCompletion(ctx)) {
       notifyTaskCompleteWindows();
     }
   });

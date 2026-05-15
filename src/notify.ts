@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { readFileSync } from "node:fs";
 
 const WINDOWS_TOAST_TITLE = "任务已完成";
 const WINDOWS_TOAST_BODY = "Pi Agent 已完成任务，正在等待你的输入。";
@@ -48,8 +49,23 @@ export function isSubagentProcess(env: Env = process.env, argv: readonly string[
   return mode === "json" && (argv.includes("-p") || argv.includes("--print") || argv.includes("--no-session"));
 }
 
-export function supportsWindowsToast(platform: NodeJS.Platform = process.platform): boolean {
-  return platform === "win32";
+export function isWsl(env: Env = process.env, platform: NodeJS.Platform = process.platform): boolean {
+  if (platform !== "linux") return false;
+  if (env.WSL_DISTRO_NAME || env.WSLENV) return true;
+  if (env !== process.env) return false;
+
+  try {
+    return /microsoft|wsl/i.test(readFileSync("/proc/version", "utf8"));
+  } catch {
+    return false;
+  }
+}
+
+export function supportsWindowsToast(
+  platform: NodeJS.Platform = process.platform,
+  env: Env = process.env,
+): boolean {
+  return platform === "win32" || isWsl(env, platform);
 }
 
 export function shouldNotifyTaskCompletion(
@@ -58,7 +74,7 @@ export function shouldNotifyTaskCompletion(
   argv: readonly string[] = process.argv,
   platform: NodeJS.Platform = process.platform,
 ): boolean {
-  return supportsWindowsToast(platform) && ctx?.hasUI === true && !isSubagentProcess(env, argv);
+  return supportsWindowsToast(platform, env) && ctx?.hasUI === true && !isSubagentProcess(env, argv);
 }
 
 export function notifyTaskCompleteWindows(title = WINDOWS_TOAST_TITLE, body = WINDOWS_TOAST_BODY): void {

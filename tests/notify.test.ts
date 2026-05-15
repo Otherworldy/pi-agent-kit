@@ -1,11 +1,25 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { isSubagentProcess, shouldNotifyTaskCompletion } from "../src/notify.ts";
+import { parseFooterFixedConfig } from "../src/config.ts";
+import { isSubagentProcess, shouldNotifyTaskCompletion, supportsWindowsToast } from "../src/notify.ts";
 
-test("task completion notifications are main interactive Windows agent only", () => {
+test("task completion notifications are main interactive Windows or WSL agent only", () => {
   assert.equal(shouldNotifyTaskCompletion({ hasUI: true }, {}, ["node", "pi"], "win32"), true);
   assert.equal(shouldNotifyTaskCompletion({ hasUI: false }, {}, ["node", "pi"], "win32"), false);
   assert.equal(shouldNotifyTaskCompletion({ hasUI: true }, {}, ["node", "pi"], "linux"), false);
+
+  const wslEnv = { WSL_DISTRO_NAME: "Ubuntu" };
+  assert.equal(supportsWindowsToast("linux", wslEnv), true);
+  assert.equal(shouldNotifyTaskCompletion({ hasUI: true }, wslEnv, ["node", "pi"], "linux"), true);
+  assert.equal(
+    shouldNotifyTaskCompletion({ hasUI: true }, { ...wslEnv, PI_SUBAGENT_CHILD: "1" }, ["node", "pi"], "linux"),
+    false,
+  );
+});
+
+test("task completion notifications are enabled by default and configurable", () => {
+  assert.equal(parseFooterFixedConfig({}).taskCompletionNotification, true);
+  assert.equal(parseFooterFixedConfig({ footerFixed: { taskCompletionNotification: false } }).taskCompletionNotification, false);
 });
 
 test("subagent processes are detected from pi-subagents environment", () => {

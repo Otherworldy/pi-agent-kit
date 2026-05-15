@@ -70,6 +70,13 @@ export class FooterFixedSettingsPanel extends Container {
         currentValue: options.config.showExtensionStatus ? "true" : "false",
         values: ["true", "false"],
       },
+      {
+        id: "taskCompletionNotification",
+        label: "Task completion notification",
+        description: "Send a Windows toast notification when the main interactive Pi Agent finishes a task.",
+        currentValue: options.config.taskCompletionNotification ? "true" : "false",
+        values: ["true", "false"],
+      },
     ];
 
     this.settingsList = new SettingsList(
