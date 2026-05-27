@@ -326,6 +326,7 @@ export class TerminalSplitCompositor {
   private readonly rowsDescriptor: PropertyDescriptor | undefined;
   private readonly originalWrite: (data: string) => void;
   private readonly originalDoRender: (() => void) | null;
+  private readonly originalRequestRender: ((force?: boolean) => void) | null;
   private originalRender: ((width: number) => string[]) | null;
   private readonly originalClearOnShrink: boolean | null;
   private originalCompositeLineAt: CompositeLineAt | null = null;
@@ -342,6 +343,9 @@ export class TerminalSplitCompositor {
   private renderingCluster = false;
   private renderingScrollableRoot = false;
   private checkingOverlay = false;
+  private viewportOnlyRenderPending = false;
+  private rootWindowDirty = true;
+  private rootRenderWidth = 0;
   private scrollOffset = 0;
   private maxScrollOffset = 0;
   private lastRootLineCount = 0;
@@ -369,6 +373,7 @@ export class TerminalSplitCompositor {
     this.rowsDescriptor = descriptorForRows(options.terminal);
     this.originalWrite = options.terminal.write.bind(options.terminal);
     this.originalDoRender = typeof options.tui.doRender === "function" ? options.tui.doRender.bind(options.tui) : null;
+    this.originalRequestRender = typeof options.tui.requestRender === "function" ? options.tui.requestRender.bind(options.tui) : null;
     this.originalRender = typeof options.tui.render === "function" ? options.tui.render.bind(options.tui) : null;
     this.originalClearOnShrink = typeof options.tui.getClearOnShrink === "function" ? Boolean(options.tui.getClearOnShrink()) : null;
   }
@@ -402,6 +407,13 @@ export class TerminalSplitCompositor {
     if (this.originalRender) {
       this.tui.render = (width: number) => this.renderScrollableRoot(width);
     }
+    if (this.originalRequestRender) {
+      this.tui.requestRender = (force?: boolean) => {
+        this.rootWindowDirty = true;
+        this.viewportOnlyRenderPending = false;
+        this.originalRequestRender?.(force);
+      };
+    }
     if (typeof this.tui.setClearOnShrink === "function") {
       this.tui.setClearOnShrink(true);
     }
@@ -413,6 +425,10 @@ export class TerminalSplitCompositor {
     this.terminal.write = (data: string) => this.write(data);
     if (this.originalDoRender) {
       this.tui.doRender = () => {
+        const viewportOnly = this.viewportOnlyRenderPending;
+        if (!viewportOnly) {
+          this.rootWindowDirty = true;
+        }
         this.renderPassActive = true;
         this.renderPassCluster = null;
         try {
@@ -421,6 +437,10 @@ export class TerminalSplitCompositor {
         } finally {
           this.renderPassActive = false;
           this.renderPassCluster = null;
+          this.viewportOnlyRenderPending = false;
+          if (viewportOnly && this.rootWindowDirty && !this.disposed) {
+            this.originalRequestRender?.();
+          }
         }
       };
     }
@@ -470,7 +490,8 @@ export class TerminalSplitCompositor {
     this.clearSelection();
     this.lastLeftPress = null;
     this.scrollOffset = 0;
-    this.requestRender();
+    this.updateVisibleRootWindow();
+    this.requestViewportRender();
     return true;
   }
 
@@ -492,7 +513,8 @@ export class TerminalSplitCompositor {
       this.clearSelection();
       this.lastLeftPress = null;
       this.scrollOffset = nextOffset;
-      this.requestRender();
+      this.updateVisibleRootWindow();
+      this.requestViewportRender();
       return true;
     }
 
@@ -539,6 +561,9 @@ export class TerminalSplitCompositor {
     this.terminal.write = this.originalWrite;
     if (this.originalDoRender) {
       this.tui.doRender = this.originalDoRender;
+    }
+    if (this.originalRequestRender) {
+      this.tui.requestRender = this.originalRequestRender;
     }
     if (this.originalRender) {
       this.tui.render = this.originalRender;
@@ -598,15 +623,29 @@ export class TerminalSplitCompositor {
     }
   }
 
-  private refreshRootWindow(width: number): number {
-    if (!this.originalRender) return this.updateVisibleRootWindow();
-
+  private refreshRootWindow(width: number, options: { allowRootRender?: boolean } = {}): number {
     const rawRows = this.getRawRows();
     const renderWidth = Math.max(1, width);
     const cluster = this.getCluster(renderWidth, rawRows);
     const scrollableRows = Math.max(1, rawRows - cluster.lines.length);
+
+    if (!this.originalRender) {
+      this.maxScrollOffset = Math.max(0, this.rootLines.length - scrollableRows);
+      this.scrollOffset = Math.max(0, Math.min(this.scrollOffset, this.maxScrollOffset));
+      return this.updateVisibleRootWindow(scrollableRows);
+    }
+
+    const canReuseRootLines = (!this.rootWindowDirty || this.viewportOnlyRenderPending) && this.rootLines.length > 0 && this.rootRenderWidth === renderWidth;
+    if (canReuseRootLines || options.allowRootRender === false) {
+      this.maxScrollOffset = Math.max(0, this.rootLines.length - scrollableRows);
+      this.scrollOffset = Math.max(0, Math.min(this.scrollOffset, this.maxScrollOffset));
+      return this.updateVisibleRootWindow(scrollableRows);
+    }
+
     const lines = this.originalRender(renderWidth);
     this.rootLines = lines;
+    this.rootRenderWidth = renderWidth;
+    this.rootWindowDirty = false;
     if (this.scrollOffset > 0 && this.lastRootLineCount > 0 && lines.length > this.lastRootLineCount) {
       this.scrollOffset += lines.length - this.lastRootLineCount;
     }
@@ -622,9 +661,25 @@ export class TerminalSplitCompositor {
 
     const mousePackets = this.mouseScroll ? parseSgrMousePackets(data) : null;
     if (mousePackets) {
+      let pendingScrollDelta = 0;
+      const flushPendingScroll = () => {
+        if (pendingScrollDelta === 0) return;
+        this.selectionDragging = false;
+        this.scrollBy(pendingScrollDelta);
+        pendingScrollDelta = 0;
+      };
+
       for (const packet of mousePackets) {
+        const delta = mouseScrollDelta(packet);
+        if (delta !== 0) {
+          pendingScrollDelta += delta;
+          continue;
+        }
+
+        flushPendingScroll();
         this.handleMousePacket(packet);
       }
+      flushPendingScroll();
       return { consume: true };
     }
 
@@ -679,7 +734,7 @@ export class TerminalSplitCompositor {
       this.lastLeftPress = null;
       this.preserveSelectionFocusOnRelease = false;
       this.selectionFocus = location.point;
-      this.requestRender();
+      this.requestViewportRender();
       return;
     }
   }
@@ -714,7 +769,7 @@ export class TerminalSplitCompositor {
     } else {
       this.clearSelection();
     }
-    this.requestRender();
+    this.requestViewportRender();
   }
 
   private startSelection(location: SelectionLocation): void {
@@ -732,7 +787,7 @@ export class TerminalSplitCompositor {
       this.selectionDragging = true;
       this.preserveSelectionFocusOnRelease = true;
       this.lastLeftPress = null;
-      this.requestRender();
+      this.requestViewportRender();
       return;
     }
 
@@ -742,7 +797,7 @@ export class TerminalSplitCompositor {
     this.selectionDragging = true;
     this.preserveSelectionFocusOnRelease = false;
     this.lastLeftPress = { area: location.area, line, at: now };
-    this.requestRender();
+    this.requestViewportRender();
   }
 
   private selectionLocationForPacket(packet: SgrMousePacket): SelectionLocation | null {
@@ -783,7 +838,7 @@ export class TerminalSplitCompositor {
       line: edgeLine,
       col: Math.max(0, packet.col - 1),
     };
-    this.requestRender();
+    this.requestViewportRender();
     return true;
   }
 
@@ -866,7 +921,8 @@ export class TerminalSplitCompositor {
   }
 
   private scrollBy(delta: number): void {
-    this.refreshRootWindow(Math.max(1, this.terminal.columns || 80));
+    const width = Math.max(1, this.terminal.columns || 80);
+    this.refreshRootWindow(width, { allowRootRender: this.rootLines.length === 0 || this.rootRenderWidth !== width });
 
     const nextOffset = Math.max(0, Math.min(this.scrollOffset + delta, this.maxScrollOffset));
     if (nextOffset === this.scrollOffset) return;
@@ -874,11 +930,23 @@ export class TerminalSplitCompositor {
     this.clearSelection();
     this.lastLeftPress = null;
     this.scrollOffset = nextOffset;
-    this.requestRender();
+    this.updateVisibleRootWindow();
+    this.requestViewportRender({ allowStaleRoot: true });
   }
 
-  private requestRender(): void {
-    if (typeof this.tui.requestRender === "function") {
+  private requestViewportRender(options: { allowStaleRoot?: boolean } = {}): void {
+    const canUseViewportOnly = this.originalRequestRender
+      && this.rootLines.length > 0
+      && (!this.rootWindowDirty || options.allowStaleRoot === true);
+    if (canUseViewportOnly) {
+      this.viewportOnlyRenderPending = true;
+      this.originalRequestRender?.();
+      return;
+    }
+
+    if (this.originalRequestRender) {
+      this.originalRequestRender();
+    } else if (typeof this.tui.requestRender === "function") {
       this.tui.requestRender();
     }
   }

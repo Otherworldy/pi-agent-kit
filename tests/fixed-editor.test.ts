@@ -247,6 +247,108 @@ test("terminal row reservation does not recurse when hidden editor render reads 
   compositor.dispose();
 });
 
+test("terminal split reuses rendered root lines for scroll-only frames", () => {
+  const terminal = new FakeTerminal();
+  let inputListener: ((data: string) => { consume?: boolean } | undefined) | null = null;
+  let rootRenderCount = 0;
+  const tui = {
+    terminal,
+    renderedLines: [] as string[],
+    render(width: number) {
+      rootRenderCount += 1;
+      return Array.from({ length: 40 }, (_, index) => `root-${index}:${width}`);
+    },
+    doRender() {
+      this.renderedLines = this.render(this.terminal.columns);
+    },
+    requestRender() {
+      this.doRender();
+    },
+    addInputListener(listener: (data: string) => { consume?: boolean } | undefined) {
+      inputListener = listener;
+      return () => {
+        inputListener = null;
+      };
+    },
+  };
+
+  const compositor = new TerminalSplitCompositor({
+    tui,
+    terminal,
+    renderCluster: () => ({ lines: ["editor"], cursor: null }),
+  });
+
+  compositor.install();
+  tui.doRender();
+  assert.equal(rootRenderCount, 1);
+
+  assert.ok(inputListener);
+  assert.ok((inputListener as (data: string) => { consume?: boolean } | undefined)("\x1b[<64;1;1M")?.consume);
+  assert.equal(rootRenderCount, 1);
+  assert.deepEqual(tui.renderedLines.slice(0, 2), ["root-26:40", "root-27:40"]);
+
+  tui.requestRender();
+  assert.equal(rootRenderCount, 2);
+
+  compositor.dispose();
+});
+
+test("terminal split keeps scrolling responsive when the root is dirty", () => {
+  const terminal = new FakeTerminal();
+  let inputListener: ((data: string) => { consume?: boolean } | undefined) | null = null;
+  let rootRenderCount = 0;
+  const tui = {
+    terminal,
+    renderQueued: false,
+    renderedLines: [] as string[],
+    render(width: number) {
+      rootRenderCount += 1;
+      return Array.from({ length: 40 }, (_, index) => `root-${index}:${width}`);
+    },
+    doRender() {
+      this.renderedLines = this.render(this.terminal.columns);
+    },
+    requestRender() {
+      this.renderQueued = true;
+    },
+    flushRender() {
+      if (!this.renderQueued) return;
+      this.renderQueued = false;
+      this.doRender();
+    },
+    addInputListener(listener: (data: string) => { consume?: boolean } | undefined) {
+      inputListener = listener;
+      return () => {
+        inputListener = null;
+      };
+    },
+  };
+
+  const compositor = new TerminalSplitCompositor({
+    tui,
+    terminal,
+    renderCluster: () => ({ lines: ["editor"], cursor: null }),
+  });
+
+  compositor.install();
+  tui.doRender();
+  assert.equal(rootRenderCount, 1);
+
+  tui.requestRender();
+  assert.ok(inputListener);
+  assert.ok((inputListener as (data: string) => { consume?: boolean } | undefined)("\x1b[<64;1;1M")?.consume);
+  assert.equal(rootRenderCount, 1);
+
+  tui.flushRender();
+  assert.equal(rootRenderCount, 1);
+  assert.deepEqual(tui.renderedLines.slice(0, 2), ["root-26:40", "root-27:40"]);
+
+  tui.flushRender();
+  assert.equal(rootRenderCount, 2);
+
+  compositor.dispose();
+});
+
 test("terminal split suspends fixed cluster painting while overlays are active", () => {
   const terminal = new FakeTerminal();
   const tui = {
