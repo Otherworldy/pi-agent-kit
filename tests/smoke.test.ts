@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -32,18 +33,22 @@ function createFooterData() {
   };
 }
 
+const editorTheme = { borderColor: (text: string) => text, selectList: {} };
+
 function createTempSettings() {
   const root = mkdtempSync(join(tmpdir(), "pi-footer-fixed-"));
   const home = join(root, "home");
   const cwd = join(root, "project");
   mkdirSync(join(cwd, ".pi"), { recursive: true });
   mkdirSync(home, { recursive: true });
+  execFileSync("git", ["init", "-b", "main"], { cwd, stdio: "ignore" });
   writeFileSync(join(cwd, ".pi", "settings.json"), JSON.stringify({
     footerFixed: {
       fixedEditor: true,
       mouseScroll: true,
       showExtensionStatus: true,
       taskCompletionNotification: true,
+      editorChrome: true,
     },
   }), "utf-8");
 
@@ -85,6 +90,7 @@ function createHarness(cwd: string, options: { synchronousEditorComponent?: bool
   let currentEditorFactory: ((tui: any, theme: any, keybindings: any) => any) | undefined = options.presetEditorFactory;
   let customState: { panel: any; done: () => void } | undefined;
   let mountedEditor: any;
+  let thinkingLevel = "high";
 
   const notifies: Array<{ message: string; type: string | undefined }> = [];
   const widgetCalls: Array<{ key: string; content: unknown; options: unknown }> = [];
@@ -125,6 +131,9 @@ function createHarness(cwd: string, options: { synchronousEditorComponent?: bool
     setWidget(key: string, content: unknown, options?: unknown) {
       widgetCalls.push({ key, content, options });
     },
+    theme: {
+      fg: (_kind: string, text: string) => text,
+    },
     setFooter(factory: typeof footerFactory) {
       footerFactory = factory;
       if (options.synchronousFooter && factory) {
@@ -139,7 +148,7 @@ function createHarness(cwd: string, options: { synchronousEditorComponent?: bool
       editorFactories.push(factory);
       if (options.synchronousEditorComponent && factory) {
         editorContainer.children = [];
-        mountedEditor = factory(tui, {}, {});
+        mountedEditor = factory(tui, editorTheme, {});
         editorContainer.children.push(mountedEditor);
       }
     },
@@ -162,18 +171,29 @@ function createHarness(cwd: string, options: { synchronousEditorComponent?: bool
     registerCommand(name: string, command: { handler: typeof commandHandler }) {
       if (name === "footer-fixed") commandHandler = command.handler;
     },
+    getThinkingLevel() {
+      return thinkingLevel;
+    },
   };
 
   footerFixedPlugin(api as never);
 
-  const ctx = { hasUI: true, cwd, ui };
+  const ctx = {
+    hasUI: true,
+    cwd,
+    ui,
+    model: { contextWindow: 200000, id: "claude-sonnet-4-20250514" },
+    sessionManager: { getEntries: () => [] },
+    modelRegistry: {},
+    getContextUsage: () => ({ contextWindow: 200000, percent: 42, tokens: 84000 }),
+  };
 
   async function startWithMountedEditor() {
     assert.ok(sessionStart);
     await sessionStart({ reason: "new" }, ctx);
     assert.ok(currentEditorFactory);
 
-    const editor = mountedEditor ?? currentEditorFactory(tui, {}, {});
+    const editor = mountedEditor ?? currentEditorFactory(tui, editorTheme, {});
     if (!editorContainer.children.includes(editor)) {
       editorContainer.children = [editor];
     }
@@ -201,6 +221,9 @@ function createHarness(cwd: string, options: { synchronousEditorComponent?: bool
     tui,
     terminal,
     editorContainer,
+    get mountedEditor() {
+      return mountedEditor;
+    },
     get currentEditorFactory() {
       return currentEditorFactory;
     },
@@ -231,7 +254,7 @@ test("plugin exports a default factory and registers lifecycle hooks plus comman
   assert.equal(typeof footerFixedPlugin, "function");
   footerFixedPlugin(api as never);
 
-  assert.deepEqual(events, ["session_start", "agent_end", "session_shutdown"]);
+  assert.deepEqual(events, ["session_start", "thinking_level_select", "model_select", "agent_end", "session_shutdown"]);
   assert.deepEqual(commands, ["footer-fixed"]);
 });
 
@@ -286,7 +309,7 @@ test("startup retries fixed editor install after delayed editor container mount"
 
     await harness.sessionStart({ reason: "new" }, harness.ctx);
     assert.ok(harness.currentEditorFactory);
-    const editor = harness.currentEditorFactory(harness.tui, {}, {});
+    const editor = harness.currentEditorFactory(harness.tui, editorTheme, {});
     await Promise.resolve();
 
     assert.equal(harness.tui.inputListeners.length, 0);
@@ -351,5 +374,65 @@ test("settings toggles do not wrap pi-footer-fixed editor factory repeatedly", a
 
     assert.equal(harness.currentEditorFactory, firstFactory);
     assert.ok(harness.editorFactories.every((factory) => factory === firstFactory));
+  });
+});
+
+test("editor chrome renders model, thinking level, context usage, git status, cwd, and body padding", async () => {
+  await withTempSettings(async ({ cwd }) => {
+    const harness = createHarness(cwd, { synchronousEditorComponent: true, synchronousFooter: true });
+    assert.ok(harness.sessionStart);
+
+    await harness.sessionStart({ reason: "new" }, harness.ctx);
+    await Promise.resolve();
+
+    assert.ok(harness.mountedEditor);
+    const lines = harness.mountedEditor.render(120);
+    assert.ok(lines[0]?.includes("sonnet-4"));
+    assert.ok(lines[0]?.includes("high"));
+    assert.ok(lines[0]?.includes("ctx 42%/200k"));
+    assert.ok(lines[0]?.includes("main"));
+    assert.match(lines[0] ?? "", /clean|Δ/);
+    assert.ok(lines.at(-1)?.includes("project"));
+    assert.equal(lines[1], `│${" ".repeat(118)}│`);
+    assert.equal(lines[2]?.startsWith("│ "), true);
+    assert.equal(lines[2]?.endsWith(" │"), true);
+  });
+});
+
+test("editor chrome keeps autocomplete popup rows below the custom border", async () => {
+  await withTempSettings(async ({ cwd }) => {
+    const baseEditorFactory = () => ({
+      onSubmit: undefined,
+      setText() {},
+      getText: () => "",
+      render: (width: number) => ["─".repeat(width), "body".padEnd(width), "─".repeat(width), "popup".padEnd(width)],
+    });
+    const harness = createHarness(cwd, {
+      synchronousEditorComponent: true,
+      synchronousFooter: true,
+      presetEditorFactory: baseEditorFactory,
+    });
+    assert.ok(harness.sessionStart);
+
+    await harness.sessionStart({ reason: "new" }, harness.ctx);
+
+    const lines = harness.mountedEditor.render(80);
+    assert.equal(lines.at(-2)?.startsWith("╰"), true);
+    assert.match(lines.at(-1) ?? "", /popup/);
+  });
+});
+
+test("settings overlay persists editor chrome toggle", async () => {
+  await withTempSettings(async ({ cwd }) => {
+    const harness = createHarness(cwd);
+    await harness.startWithMountedEditor();
+
+    const { promise, state } = await harness.openSettings();
+    state.panel.settingsList.onChange("editorChrome", "false");
+    state.done();
+    await promise;
+
+    const settings = JSON.parse(readFileSync(join(cwd, ".pi", "settings.json"), "utf-8"));
+    assert.equal(settings.footerFixed.editorChrome, false);
   });
 });

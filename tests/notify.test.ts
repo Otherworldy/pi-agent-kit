@@ -17,9 +17,11 @@ test("task completion notifications are main interactive Windows or WSL agent on
   );
 });
 
-test("task completion notifications are enabled by default and configurable", () => {
+test("task completion notifications and editor chrome are enabled by default and configurable", () => {
   assert.equal(parseFooterFixedConfig({}).taskCompletionNotification, true);
   assert.equal(parseFooterFixedConfig({ footerFixed: { taskCompletionNotification: false } }).taskCompletionNotification, false);
+  assert.equal(parseFooterFixedConfig({}).editorChrome, true);
+  assert.equal(parseFooterFixedConfig({ footerFixed: { editorChrome: false } }).editorChrome, false);
 });
 
 test("subagent processes are detected from pi-subagents environment", () => {

@@ -2,6 +2,7 @@ import {
   copyToClipboard,
   CustomEditor,
   type ExtensionAPI,
+  type ExtensionContext,
   type ReadonlyFooterDataProvider,
   type Theme,
 } from "@earendil-works/pi-coding-agent";
@@ -13,6 +14,7 @@ import {
   type FooterFixedConfig,
   writeFooterFixedSetting,
 } from "./config.ts";
+import { renderEditorChrome } from "./editor-chrome.ts";
 import { renderFixedEditorCluster } from "./fixed-editor/cluster.ts";
 import { emergencyTerminalModeReset, TerminalSplitCompositor } from "./fixed-editor/terminal-split.ts";
 import { notifyTaskCompleteWindows, shouldNotifyTaskCompletion } from "./notify.ts";
@@ -34,6 +36,7 @@ let config: FooterFixedConfig = {
   mouseScroll: true,
   showExtensionStatus: true,
   taskCompletionNotification: true,
+  editorChrome: true,
 };
 
 function notify(ctx: any, message: string, type: "info" | "warning" | "error" = "info"): void {
@@ -97,6 +100,8 @@ function copyTextToClipboard(ctx: any, text: string): void {
 export default function footerFixedPlugin(pi: ExtensionAPI) {
   let tuiRef: any = null;
   let currentEditor: any = null;
+  let activeCtxRef: ExtensionContext | null = null;
+  let activeThinkingLevel = "off";
   let footerDataRef: ReadonlyFooterDataProvider | null = null;
   let originalEditorFactory: EditorFactory | undefined;
   let wrappedEditorFactory: FooterFixedEditorFactory | undefined;
@@ -233,6 +238,18 @@ export default function footerFixedPlugin(pi: ExtensionAPI) {
       const editor = factory
         ? factory(tui, theme, keybindings)
         : new CustomEditor(tui, theme, keybindings);
+
+      const originalRender = editor.render?.bind(editor);
+      if (originalRender) {
+        editor.render = (width: number) => renderEditorChrome({
+          width,
+          enabled: config.editorChrome,
+          context: activeCtxRef,
+          thinkingLevel: activeThinkingLevel,
+          borderColor: editor.borderColor,
+          renderBase: originalRender,
+        });
+      }
 
       currentEditor = editor;
 
@@ -420,7 +437,7 @@ export default function footerFixedPlugin(pi: ExtensionAPI) {
       setupEditor(ctx);
     } else if (key === "mouseScroll") {
       reinstallFixedEditor(ctx, { force: true });
-    } else if (key === "showExtensionStatus") {
+    } else if (key === "showExtensionStatus" || key === "editorChrome") {
       fixedEditorCompositor?.requestRepaint();
       tuiRef?.requestRender?.();
     }
@@ -452,6 +469,8 @@ export default function footerFixedPlugin(pi: ExtensionAPI) {
     currentEditor = null;
     tuiRef = null;
     footerDataRef = null;
+    activeCtxRef = ctx;
+    activeThinkingLevel = typeof pi.getThinkingLevel === "function" ? pi.getThinkingLevel() : "off";
 
     if (!ctx.hasUI) return;
 
@@ -459,6 +478,22 @@ export default function footerFixedPlugin(pi: ExtensionAPI) {
     setupEditor(ctx);
     reinstallFixedEditor(ctx);
     queueInstallStabilization(ctx);
+  });
+
+  pi.on("thinking_level_select", async (event, ctx) => {
+    activeThinkingLevel = event.level;
+    if (ctx.hasUI) {
+      fixedEditorCompositor?.requestRepaint();
+      tuiRef?.requestRender?.();
+    }
+  });
+
+  pi.on("model_select", async (_event, ctx) => {
+    activeCtxRef = ctx;
+    if (ctx.hasUI) {
+      fixedEditorCompositor?.requestRepaint();
+      tuiRef?.requestRender?.();
+    }
   });
 
   pi.on("agent_end", async (_event, ctx) => {
@@ -473,6 +508,7 @@ export default function footerFixedPlugin(pi: ExtensionAPI) {
     teardownFixedEditorCompositor({ resetExtendedKeyboardModes: true });
     tuiRef = null;
     currentEditor = null;
+    activeCtxRef = null;
     footerDataRef = null;
   });
 

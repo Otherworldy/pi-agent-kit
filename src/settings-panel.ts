@@ -71,6 +71,13 @@ export class FooterFixedSettingsPanel extends Container {
         values: ["true", "false"],
       },
       {
+        id: "editorChrome",
+        label: "Editor chrome",
+        description: "Show model, thinking level, directory, and git status on the input box borders.",
+        currentValue: options.config.editorChrome ? "true" : "false",
+        values: ["true", "false"],
+      },
+      {
         id: "taskCompletionNotification",
         label: "Task completion notification",
         description: "Send a Windows toast notification when the main interactive Pi Agent finishes a task.",
