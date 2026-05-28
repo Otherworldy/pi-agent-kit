@@ -15,7 +15,7 @@ type ThemeLike = {
 
 export interface EditorChromeContextLike {
   cwd?: string;
-  model?: { contextWindow?: number; id?: string };
+  model?: { contextWindow?: number; id?: string; provider?: string };
   ui?: { theme?: ThemeLike };
   getContextUsage?: () => { percent?: number | null; contextWindow?: number; tokens?: number | null } | undefined;
 }
@@ -25,6 +25,7 @@ export interface EditorChromeRenderInput {
   enabled: boolean;
   context: EditorChromeContextLike | null | undefined;
   thinkingLevel: string;
+  fastLabel?: string;
   borderColor?: (text: string) => string;
   renderBase: (width: number) => string[];
 }
@@ -144,14 +145,23 @@ function thinkingColor(level: string): ThemeColor {
 function compactModelId(modelId: string, maxWidth: number): string {
   if (visibleWidth(modelId) <= maxWidth) return modelId;
 
-  const simplified = modelId
+  const slashIndex = modelId.indexOf("/");
+  const prefix = slashIndex === -1 ? "" : modelId.slice(0, slashIndex + 1);
+  const id = slashIndex === -1 ? modelId : modelId.slice(slashIndex + 1);
+  const simplifiedId = id
     .replace(/^claude-/, "")
     .replace(/^gpt-/, "")
     .replace(/-20\d{6}$/, "")
     .replace(/-\d{4}-\d{2}-\d{2}$/, "");
+  const simplified = `${prefix}${simplifiedId}`;
 
   if (visibleWidth(simplified) <= maxWidth) return simplified;
   return truncateToWidth(simplified, maxWidth, "…");
+}
+
+function modelChromeId(context: EditorChromeContextLike): string {
+  const modelId = context.model?.id ?? "model unknown";
+  return context.model?.provider ? `${context.model.provider}/${modelId}` : modelId;
 }
 
 function compactPath(cwd: string): string {
@@ -224,24 +234,30 @@ function formatContextUsage(context: EditorChromeContextLike, theme: ThemeLike |
   }
 }
 
-function buildTopLabels(context: EditorChromeContextLike, thinkingLevel: string, width: number): { left: string; right: string } {
+function buildTopLabels(
+  context: EditorChromeContextLike,
+  thinkingLevel: string,
+  width: number,
+  fastLabel?: string,
+): { left: string; right: string } {
   const theme = context.ui?.theme;
   const cwd = context.cwd ?? process.cwd();
   const git = formatGitLabel(theme, getGitInfo(cwd));
-  const modelId = context.model?.id ?? "model unknown";
+  const modelId = modelChromeId(context);
   const innerWidth = Math.max(0, width - 2);
   const maxRight = Math.max(0, Math.floor(innerWidth * 0.46));
   const gitWidth = Math.min(visibleWidth(git), maxRight);
   const thinkingText = thinkingLevel || "off";
   const thinking = fg(theme, thinkingColor(thinkingText), thinkingText);
+  const fast = fastLabel ? fg(theme, fastLabel.includes("*") ? "warning" : "accent", fastLabel) : "";
   const contextUsage = formatContextUsage(context, theme);
   const separator = fg(theme, "dim", " · ");
-  const modelMaxWidth = Math.max(
-    1,
-    innerWidth - gitWidth - visibleWidth(separator) * (contextUsage ? 2 : 1) - visibleWidth(thinkingText) - visibleWidth(contextUsage) - 3,
-  );
+  const fixedParts = [thinking, fast, contextUsage].filter(Boolean);
+  const fixedWidth = fixedParts.reduce((total, part) => total + visibleWidth(part), 0);
+  const separatorWidth = visibleWidth(separator) * fixedParts.length;
+  const modelMaxWidth = Math.max(1, innerWidth - gitWidth - fixedWidth - separatorWidth - 3);
   const model = fg(theme, "text", compactModelId(modelId, modelMaxWidth));
-  const leftParts = [model, thinking, contextUsage].filter(Boolean);
+  const leftParts = [model, ...fixedParts];
 
   return {
     left: ` ${leftParts.join(separator)} `,
@@ -272,7 +288,7 @@ export function renderEditorChrome(input: EditorChromeRenderInput): string[] {
   if (!split) return input.renderBase(input.width);
 
   const borderColor = input.borderColor ?? ((text: string) => text);
-  const top = buildTopLabels(input.context, input.thinkingLevel, width);
+  const top = buildTopLabels(input.context, input.thinkingLevel, width, input.fastLabel);
   const bottom = buildBottomLabels(input.context);
   const bodyPadding = " ".repeat(paddingX);
   const popupPadding = " ".repeat(paddingX + 1);

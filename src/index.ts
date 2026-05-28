@@ -11,9 +11,18 @@ import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import {
   parseFooterFixedConfig,
   readSettings,
+  type FooterFixedBooleanSettingKey,
   type FooterFixedConfig,
   writeFooterFixedSetting,
 } from "./config.ts";
+import {
+  formatFastHelp,
+  formatFastStatusLabel,
+  formatFastStatusMessage,
+  parseFastCommand,
+  patchFastPayload,
+  supportsFast,
+} from "./fast-mode.ts";
 import { renderEditorChrome } from "./editor-chrome.ts";
 import { renderFixedEditorCluster } from "./fixed-editor/cluster.ts";
 import { emergencyTerminalModeReset, TerminalSplitCompositor } from "./fixed-editor/terminal-split.ts";
@@ -37,6 +46,12 @@ let config: FooterFixedConfig = {
   showExtensionStatus: true,
   taskCompletionNotification: true,
   editorChrome: true,
+  fast: {
+    enabled: false,
+    persistState: true,
+    serviceTier: "priority",
+    supportedModels: ["openai/gpt-5.4", "openai/gpt-5.5", "openai-codex/gpt-5.4", "openai-codex/gpt-5.5"],
+  },
 };
 
 function notify(ctx: any, message: string, type: "info" | "warning" | "error" = "info"): void {
@@ -115,6 +130,8 @@ export default function footerFixedPlugin(pi: ExtensionAPI) {
   let installRetryAttempts = 0;
   let installRetryTimer: ReturnType<typeof setTimeout> | null = null;
   const installStabilizationTimers = new Set<ReturnType<typeof setTimeout>>();
+  let fastDesired = false;
+  let currentModelRef: any = null;
 
   function teardownFixedEditorCompositor(options?: { resetExtendedKeyboardModes?: boolean }) {
     const hadCompositor = fixedEditorCompositor !== null;
@@ -246,6 +263,7 @@ export default function footerFixedPlugin(pi: ExtensionAPI) {
           enabled: config.editorChrome,
           context: activeCtxRef,
           thinkingLevel: activeThinkingLevel,
+          fastLabel: getFastChromeLabel(activeCtxRef),
           borderColor: editor.borderColor,
           renderBase: originalRender,
         });
@@ -327,6 +345,29 @@ export default function footerFixedPlugin(pi: ExtensionAPI) {
       clearTimeout(timer);
     }
     installStabilizationTimers.clear();
+  }
+
+  function activeModel(ctx?: any): any {
+    return ctx?.model ?? currentModelRef;
+  }
+
+  function getFastChromeLabel(ctx?: any): string | undefined {
+    const label = formatFastStatusLabel(fastDesired, activeModel(ctx), config.fast.supportedModels);
+    if (!label) return undefined;
+    return label.replace(/^⚡\s*/, "⚡");
+  }
+
+  function updateFastStatus(ctx: any): void {
+    if (!ctx?.hasUI || typeof ctx.ui?.setStatus !== "function") return;
+
+    const label = getFastChromeLabel(ctx);
+    if (!label) {
+      ctx.ui.setStatus("footer-fixed-fast", undefined);
+      return;
+    }
+
+    const color = supportsFast(activeModel(ctx), config.fast.supportedModels) ? "accent" : "warning";
+    ctx.ui.setStatus("footer-fixed-fast", ctx.ui.theme?.fg?.(color, label) ?? label);
   }
 
   function installWhenTuiReady(ctx: any, tui: any) {
@@ -429,7 +470,17 @@ export default function footerFixedPlugin(pi: ExtensionAPI) {
     });
   }
 
-  function applySetting(ctx: any, key: keyof FooterFixedConfig, value: boolean): void {
+  function applySetting(ctx: any, key: FooterFixedBooleanSettingKey, value: boolean): void {
+    if (key === "fast.enabled") {
+      if (config.fast.enabled === value) return;
+      config.fast.enabled = value;
+      fastDesired = value;
+      updateFastStatus(ctx);
+      const persisted = writeFooterFixedSetting(ctx.cwd, { fast: { enabled: value } });
+      if (!persisted) notify(ctx, "pi-footer-fixed setting changed but was not persisted; check settings.json", "warning");
+      return;
+    }
+
     if (config[key] === value) return;
 
     config[key] = value;
@@ -461,6 +512,55 @@ export default function footerFixedPlugin(pi: ExtensionAPI) {
     }
   }
 
+  function reloadRuntimeConfig(ctx: any): void {
+    config = parseFooterFixedConfig(readSettings(ctx.cwd));
+    fastDesired = config.fast.enabled || pi.getFlag?.("fast") === true;
+    config.fast.enabled = fastDesired;
+    updateFastStatus(ctx);
+  }
+
+  async function handleFastCommand(args: string | string[], ctx: any): Promise<void> {
+    const { action } = parseFastCommand(args);
+    if (action === "help") {
+      notify(ctx, formatFastHelp(), "info");
+      return;
+    }
+    if (action === "reload") {
+      reloadRuntimeConfig(ctx);
+      notify(ctx, "Fast mode settings reloaded", "info");
+      return;
+    }
+    if (action === "status") {
+      notify(ctx, formatFastStatusMessage(fastDesired, activeModel(ctx), config.fast.supportedModels, config.fast.serviceTier), "info");
+      return;
+    }
+
+    fastDesired = action === "toggle" ? !fastDesired : action === "on";
+    config.fast.enabled = fastDesired;
+    updateFastStatus(ctx);
+    if (config.fast.persistState) {
+      const persisted = writeFooterFixedSetting(ctx.cwd, { fast: { enabled: fastDesired } });
+      if (!persisted) notify(ctx, "Fast mode changed but was not persisted; check settings.json", "warning");
+    }
+    notify(ctx, formatFastStatusMessage(fastDesired, activeModel(ctx), config.fast.supportedModels, config.fast.serviceTier), "info");
+  }
+
+  pi.registerFlag?.("fast", {
+    description: "Start with fast mode enabled for allow-listed OpenAI-compatible models",
+    type: "boolean",
+    default: false,
+  });
+
+  pi.on("before_provider_request", (event, ctx) => {
+    currentModelRef = activeModel(ctx);
+    return patchFastPayload(event.payload, {
+      enabled: fastDesired,
+      model: currentModelRef,
+      supportedModels: config.fast.supportedModels,
+      serviceTier: config.fast.serviceTier,
+    });
+  });
+
   pi.on("session_start", async (_event, ctx) => {
     config = parseFooterFixedConfig(readSettings(ctx.cwd));
     needsFixedEditorReinstall = false;
@@ -471,6 +571,10 @@ export default function footerFixedPlugin(pi: ExtensionAPI) {
     footerDataRef = null;
     activeCtxRef = ctx;
     activeThinkingLevel = typeof pi.getThinkingLevel === "function" ? pi.getThinkingLevel() : "off";
+    currentModelRef = ctx.model;
+    fastDesired = config.fast.enabled || pi.getFlag?.("fast") === true;
+    config.fast.enabled = fastDesired;
+    updateFastStatus(ctx);
 
     if (!ctx.hasUI) return;
 
@@ -488,8 +592,10 @@ export default function footerFixedPlugin(pi: ExtensionAPI) {
     }
   });
 
-  pi.on("model_select", async (_event, ctx) => {
+  pi.on("model_select", async (event, ctx) => {
     activeCtxRef = ctx;
+    currentModelRef = event.model ?? ctx.model;
+    updateFastStatus(ctx);
     if (ctx.hasUI) {
       fixedEditorCompositor?.requestRepaint();
       tuiRef?.requestRender?.();
@@ -502,14 +608,16 @@ export default function footerFixedPlugin(pi: ExtensionAPI) {
     }
   });
 
-  pi.on("session_shutdown", async () => {
+  pi.on("session_shutdown", async (_event, ctx) => {
     installRetryAttempts = 0;
     clearInstallTimers();
     teardownFixedEditorCompositor({ resetExtendedKeyboardModes: true });
+    ctx?.ui?.setStatus?.("footer-fixed-fast", undefined);
     tuiRef = null;
     currentEditor = null;
     activeCtxRef = null;
     footerDataRef = null;
+    currentModelRef = null;
   });
 
   pi.registerCommand("footer-fixed", {
@@ -518,4 +626,12 @@ export default function footerFixedPlugin(pi: ExtensionAPI) {
       await openSettings(ctx);
     },
   });
+
+  pi.registerCommand("fast", {
+    description: "Toggle OpenAI priority fast mode for allow-listed custom provider models",
+    handler: async (args, ctx) => {
+      await handleFastCommand(args, ctx);
+    },
+  });
+
 }

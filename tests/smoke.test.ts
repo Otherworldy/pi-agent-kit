@@ -25,10 +25,10 @@ class FakeTerminal {
   hideCursor(): void {}
 }
 
-function createFooterData() {
+function createFooterData(statuses: Map<string, string>) {
   return {
     getGitBranch: () => "main",
-    getExtensionStatuses: () => new Map<string, string>(),
+    getExtensionStatuses: () => statuses,
     onBranchChange: () => () => {},
   };
 }
@@ -49,6 +49,12 @@ function createTempSettings() {
       showExtensionStatus: true,
       taskCompletionNotification: true,
       editorChrome: true,
+      fast: {
+        enabled: false,
+        persistState: true,
+        serviceTier: "priority",
+        supportedModels: ["my-openai/gpt-5.5"],
+      },
     },
   }), "utf-8");
 
@@ -84,8 +90,10 @@ function withTempSettings<T>(run: (paths: { root: string; home: string; cwd: str
 }
 
 function createHarness(cwd: string, options: { synchronousEditorComponent?: boolean; synchronousFooter?: boolean; presetEditorFactory?: (tui: any, theme: any, keybindings: any) => any } = {}) {
+  const handlers = new Map<string, Array<(event: any, ctx: any) => unknown | Promise<unknown>>>();
+  const commands = new Map<string, (args: string, ctx: any) => void | Promise<void>>();
   let sessionStart: ((event: unknown, ctx: any) => void | Promise<void>) | undefined;
-  let commandHandler: ((args: string[], ctx: any) => void | Promise<void>) | undefined;
+  let commandHandler: ((args: string, ctx: any) => void | Promise<void>) | undefined;
   let footerFactory: ((tui: any, theme: any, footerData: any) => any) | undefined;
   let currentEditorFactory: ((tui: any, theme: any, keybindings: any) => any) | undefined = options.presetEditorFactory;
   let customState: { panel: any; done: () => void } | undefined;
@@ -94,6 +102,8 @@ function createHarness(cwd: string, options: { synchronousEditorComponent?: bool
 
   const notifies: Array<{ message: string; type: string | undefined }> = [];
   const widgetCalls: Array<{ key: string; content: unknown; options: unknown }> = [];
+  const statuses = new Map<string, string>();
+  const flags = new Map<string, boolean | string>();
   const editorFactories: unknown[] = [];
   const terminal = new FakeTerminal();
   const statusContainer = { render: () => [] as string[] };
@@ -128,6 +138,10 @@ function createHarness(cwd: string, options: { synchronousEditorComponent?: bool
     notify(message: string, type?: string) {
       notifies.push({ message, type });
     },
+    setStatus(key: string, text: string | undefined) {
+      if (text === undefined) statuses.delete(key);
+      else statuses.set(key, text);
+    },
     setWidget(key: string, content: unknown, options?: unknown) {
       widgetCalls.push({ key, content, options });
     },
@@ -137,7 +151,7 @@ function createHarness(cwd: string, options: { synchronousEditorComponent?: bool
     setFooter(factory: typeof footerFactory) {
       footerFactory = factory;
       if (options.synchronousFooter && factory) {
-        factory(tui, {}, createFooterData());
+        factory(tui, {}, createFooterData(statuses));
       }
     },
     getEditorComponent() {
@@ -165,11 +179,21 @@ function createHarness(cwd: string, options: { synchronousEditorComponent?: bool
   };
 
   const api = {
-    on(event: string, handler: typeof sessionStart) {
-      if (event === "session_start") sessionStart = handler;
+    on(event: string, handler: (event: any, ctx: any) => unknown | Promise<unknown>) {
+      const list = handlers.get(event) ?? [];
+      list.push(handler);
+      handlers.set(event, list);
+      if (event === "session_start") sessionStart = handler as typeof sessionStart;
     },
-    registerCommand(name: string, command: { handler: typeof commandHandler }) {
+    registerCommand(name: string, command: { handler: (args: string, ctx: any) => void | Promise<void> }) {
+      commands.set(name, command.handler);
       if (name === "footer-fixed") commandHandler = command.handler;
+    },
+    registerFlag(name: string, options: { default?: boolean | string }) {
+      if (options.default !== undefined && !flags.has(name)) flags.set(name, options.default);
+    },
+    getFlag(name: string) {
+      return flags.get(name);
     },
     getThinkingLevel() {
       return thinkingLevel;
@@ -182,7 +206,7 @@ function createHarness(cwd: string, options: { synchronousEditorComponent?: bool
     hasUI: true,
     cwd,
     ui,
-    model: { contextWindow: 200000, id: "claude-sonnet-4-20250514" },
+    model: { contextWindow: 200000, id: "gpt-5.5", provider: "my-openai", api: "openai-responses" },
     sessionManager: { getEntries: () => [] },
     modelRegistry: {},
     getContextUsage: () => ({ contextWindow: 200000, percent: 42, tokens: 84000 }),
@@ -199,7 +223,7 @@ function createHarness(cwd: string, options: { synchronousEditorComponent?: bool
     }
     if (!options.synchronousFooter) {
       assert.ok(footerFactory);
-      footerFactory(tui, {}, createFooterData());
+      footerFactory(tui, {}, createFooterData(statuses));
     }
     await Promise.resolve();
     await Promise.resolve();
@@ -207,7 +231,7 @@ function createHarness(cwd: string, options: { synchronousEditorComponent?: bool
 
   async function openSettings() {
     assert.ok(commandHandler);
-    const promise = Promise.resolve(commandHandler([], ctx));
+    const promise = Promise.resolve(commandHandler("", ctx));
     await Promise.resolve();
     assert.ok(customState);
     return { promise, state: customState };
@@ -216,8 +240,12 @@ function createHarness(cwd: string, options: { synchronousEditorComponent?: bool
   return {
     ctx,
     notifies,
+    statuses,
     widgetCalls,
     editorFactories,
+    handlers,
+    commands,
+    flags,
     tui,
     terminal,
     editorContainer,
@@ -229,6 +257,19 @@ function createHarness(cwd: string, options: { synchronousEditorComponent?: bool
     },
     get sessionStart() {
       return sessionStart;
+    },
+    async emit(event: string, payload: any = {}) {
+      let result: unknown;
+      for (const handler of handlers.get(event) ?? []) {
+        const handlerResult = await handler(payload, ctx);
+        if (handlerResult !== undefined) result = handlerResult;
+      }
+      return result;
+    },
+    async runCommand(name: string, args = "") {
+      const handler = commands.get(name);
+      assert.ok(handler);
+      await handler(args, ctx);
     },
     startWithMountedEditor,
     openSettings,
@@ -242,6 +283,7 @@ function flushTimers(): Promise<void> {
 test("plugin exports a default factory and registers lifecycle hooks plus commands", () => {
   const events: string[] = [];
   const commands: string[] = [];
+  const flags: string[] = [];
   const api = {
     on(event: string) {
       events.push(event);
@@ -249,13 +291,27 @@ test("plugin exports a default factory and registers lifecycle hooks plus comman
     registerCommand(name: string) {
       commands.push(name);
     },
+    registerFlag(name: string) {
+      flags.push(name);
+    },
+    getFlag() {
+      return false;
+    },
   };
 
   assert.equal(typeof footerFixedPlugin, "function");
   footerFixedPlugin(api as never);
 
-  assert.deepEqual(events, ["session_start", "thinking_level_select", "model_select", "agent_end", "session_shutdown"]);
-  assert.deepEqual(commands, ["footer-fixed"]);
+  assert.deepEqual(events, [
+    "before_provider_request",
+    "session_start",
+    "thinking_level_select",
+    "model_select",
+    "agent_end",
+    "session_shutdown",
+  ]);
+  assert.deepEqual(commands, ["footer-fixed", "fast"]);
+  assert.deepEqual(flags, ["fast"]);
 });
 
 test("default startup installs fixed editor with mouse scrolling before settings are changed", async () => {
@@ -387,7 +443,7 @@ test("editor chrome renders model, thinking level, context usage, git status, cw
 
     assert.ok(harness.mountedEditor);
     const lines = harness.mountedEditor.render(120);
-    assert.ok(lines[0]?.includes("sonnet-4"));
+    assert.ok(lines[0]?.includes("my-openai/gpt-5.5"));
     assert.ok(lines[0]?.includes("high"));
     assert.ok(lines[0]?.includes("ctx 42%/200k"));
     assert.ok(lines[0]?.includes("main"));
@@ -434,5 +490,26 @@ test("settings overlay persists editor chrome toggle", async () => {
 
     const settings = JSON.parse(readFileSync(join(cwd, ".pi", "settings.json"), "utf-8"));
     assert.equal(settings.footerFixed.editorChrome, false);
+  });
+});
+
+test("fast command toggles status, editor chrome label, and provider payload", async () => {
+  await withTempSettings(async ({ cwd }) => {
+    const harness = createHarness(cwd, { synchronousEditorComponent: true, synchronousFooter: true });
+    assert.ok(harness.sessionStart);
+    await harness.sessionStart({ reason: "new" }, harness.ctx);
+
+    assert.equal(await harness.emit("before_provider_request", { payload: { model: "gpt-5.5" } }), undefined);
+    await harness.runCommand("fast", "on");
+
+    assert.equal(harness.statuses.get("footer-fixed-fast"), "⚡fast");
+    assert.ok(harness.mountedEditor.render(120)[0]?.includes("⚡fast"));
+    assert.deepEqual(await harness.emit("before_provider_request", { payload: { model: "gpt-5.5" } }), {
+      model: "gpt-5.5",
+      service_tier: "priority",
+    });
+
+    const settings = JSON.parse(readFileSync(join(cwd, ".pi", "settings.json"), "utf-8"));
+    assert.equal(settings.footerFixed.fast.enabled, true);
   });
 });

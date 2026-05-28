@@ -29,8 +29,9 @@ Opens a settings panel with:
 - Fixed editor
 - Mouse scroll
 - Extension status
+- Editor chrome
 - Task completion notification
-- Collapse plugin outputs
+- Fast mode
 
 ## Settings file
 
@@ -45,12 +46,35 @@ Project: `.pi/settings.json`
     "mouseScroll": true,
     "showExtensionStatus": true,
     "taskCompletionNotification": true,
-    "collapsePluginOutputs": true
+    "editorChrome": true,
+    "fast": {
+      "enabled": false,
+      "persistState": true,
+      "serviceTier": "priority",
+      "supportedModels": [
+        "openai/gpt-5.4",
+        "openai/gpt-5.5",
+        "openai-codex/gpt-5.4",
+        "openai-codex/gpt-5.5",
+        "my-openai/gpt-5.5"
+      ]
+    }
   }
 }
 ```
 
-`collapsePluginOutputs` starts Pi tool/plugin output rows in collapsed mode; Pi's normal tool-output shortcut (Ctrl+O by default) can still toggle them.
+`editorChrome` shows the current model, thinking level, working directory, git branch, and git change summary directly on the input box border, inspired by `amp-themes`.
+
+## Fast mode
+
+```text
+/fast [on|off|status|reload|help]
+pi --fast
+```
+
+Fast mode follows `pi-better-openai`: it does not register a provider. Instead, when enabled and the current model key is in `footerFixed.fast.supportedModels`, it patches the final provider payload with `service_tier: "priority"` in Pi's `before_provider_request` hook.
+
+For a Pi custom provider, keep your provider registration as-is, then add its `provider/modelId` key to `supportedModels`, for example `"my-openai/gpt-5.5"`. The upstream OpenAI-compatible endpoint/proxy must accept the `service_tier` field.
 
 `powerline.fixedEditor` and `powerline.mouseScroll` are also read as compatibility aliases.
 

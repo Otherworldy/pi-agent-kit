@@ -2,13 +2,40 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { homedir } from "node:os";
 
+export interface FastModeConfig {
+  enabled: boolean;
+  persistState: boolean;
+  serviceTier: string;
+  supportedModels: string[];
+}
+
 export interface FooterFixedConfig {
   fixedEditor: boolean;
   mouseScroll: boolean;
   showExtensionStatus: boolean;
   taskCompletionNotification: boolean;
   editorChrome: boolean;
+  fast: FastModeConfig;
 }
+
+export type FooterFixedBooleanSettingKey =
+  | "fixedEditor"
+  | "mouseScroll"
+  | "showExtensionStatus"
+  | "taskCompletionNotification"
+  | "editorChrome"
+  | "fast.enabled";
+
+export type FooterFixedConfigUpdates = Partial<Omit<FooterFixedConfig, "fast">> & {
+  fast?: Partial<FastModeConfig>;
+};
+
+export const DEFAULT_FAST_SUPPORTED_MODELS = [
+  "openai/gpt-5.4",
+  "openai/gpt-5.5",
+  "openai-codex/gpt-5.4",
+  "openai-codex/gpt-5.5",
+] as const;
 
 const DEFAULT_CONFIG: FooterFixedConfig = {
   fixedEditor: true,
@@ -16,6 +43,12 @@ const DEFAULT_CONFIG: FooterFixedConfig = {
   showExtensionStatus: true,
   taskCompletionNotification: true,
   editorChrome: true,
+  fast: {
+    enabled: false,
+    persistState: true,
+    serviceTier: "priority",
+    supportedModels: [...DEFAULT_FAST_SUPPORTED_MODELS],
+  },
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -81,12 +114,39 @@ export function readSettings(cwd: string = process.cwd()): Record<string, unknow
   return mergeSettings(readSettingsFile(getSettingsPath()), readSettingsFile(getProjectSettingsPath(cwd)));
 }
 
-function boolFromObject(value: unknown, key: keyof FooterFixedConfig): boolean | undefined {
+function boolFromObject(value: unknown, key: string): boolean | undefined {
   if (!isRecord(value)) return undefined;
   if (Object.prototype.hasOwnProperty.call(value, key)) {
     return value[key] !== false;
   }
   return undefined;
+}
+
+function stringFromObject(value: unknown, key: string, fallback: string): string {
+  if (!isRecord(value)) return fallback;
+  const item = value[key];
+  return typeof item === "string" ? item : fallback;
+}
+
+function stringArrayFromObject(value: unknown, key: string, fallback: readonly string[]): string[] {
+  if (!isRecord(value)) return [...fallback];
+  const item = value[key];
+  if (!Array.isArray(item)) return [...fallback];
+  const strings = item.filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0);
+  return strings.length > 0 ? strings : [...fallback];
+}
+
+function parseFastConfig(footerFixed: unknown): FastModeConfig {
+  const fast = isRecord(footerFixed) ? footerFixed.fast : undefined;
+
+  return {
+    enabled: boolFromObject(fast, "enabled")
+      ?? boolFromObject(footerFixed, "fastMode")
+      ?? DEFAULT_CONFIG.fast.enabled,
+    persistState: boolFromObject(fast, "persistState") ?? DEFAULT_CONFIG.fast.persistState,
+    serviceTier: stringFromObject(fast, "serviceTier", DEFAULT_CONFIG.fast.serviceTier),
+    supportedModels: stringArrayFromObject(fast, "supportedModels", DEFAULT_CONFIG.fast.supportedModels),
+  };
 }
 
 export function parseFooterFixedConfig(settings: Record<string, unknown>): FooterFixedConfig {
@@ -106,22 +166,21 @@ export function parseFooterFixedConfig(settings: Record<string, unknown>): Foote
       ?? DEFAULT_CONFIG.taskCompletionNotification,
     editorChrome: boolFromObject(footerFixed, "editorChrome")
       ?? DEFAULT_CONFIG.editorChrome,
+    fast: parseFastConfig(footerFixed),
   };
 }
 
 export function nextFooterFixedSetting(
   existingFooterFixedSetting: unknown,
-  updates: Partial<FooterFixedConfig>,
+  updates: FooterFixedConfigUpdates,
 ): unknown {
-  if (!isRecord(existingFooterFixedSetting)) {
-    return { ...DEFAULT_CONFIG, ...updates };
-  }
-  return { ...existingFooterFixedSetting, ...updates };
+  const existing = isRecord(existingFooterFixedSetting) ? existingFooterFixedSetting : DEFAULT_CONFIG;
+  return mergeSettings(existing as Record<string, unknown>, updates as Record<string, unknown>);
 }
 
 export function writeFooterFixedSetting(
   cwd: string,
-  updates: Partial<FooterFixedConfig>,
+  updates: FooterFixedConfigUpdates,
 ): boolean {
   const globalSettingsPath = getSettingsPath();
   const projectSettingsPath = getProjectSettingsPath(cwd);

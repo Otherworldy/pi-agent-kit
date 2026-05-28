@@ -1,12 +1,12 @@
 import { Container, SettingsList, truncateToWidth, visibleWidth, type Component } from "@earendil-works/pi-tui";
 import { getSettingsListTheme, type Theme } from "@earendil-works/pi-coding-agent";
 
-import type { FooterFixedConfig } from "./config.ts";
+import type { FooterFixedBooleanSettingKey, FooterFixedConfig } from "./config.ts";
 
 export interface FooterFixedSettingsPanelOptions {
   config: FooterFixedConfig;
   borderColor: (text: string) => string;
-  onChange: (key: keyof FooterFixedConfig, value: boolean) => void;
+  onChange: (key: FooterFixedBooleanSettingKey, value: boolean) => void;
   onCancel: () => void;
 }
 
@@ -84,13 +84,20 @@ export class FooterFixedSettingsPanel extends Container {
         currentValue: options.config.taskCompletionNotification ? "true" : "false",
         values: ["true", "false"],
       },
+      {
+        id: "fast.enabled",
+        label: "Fast mode",
+        description: "Request OpenAI priority service tier for allow-listed custom provider models.",
+        currentValue: options.config.fast.enabled ? "true" : "false",
+        values: ["true", "false"],
+      },
     ];
 
     this.settingsList = new SettingsList(
       items,
       items.length,
       getSettingsListTheme(),
-      (id, newValue) => options.onChange(id as keyof FooterFixedConfig, newValue === "true"),
+      (id, newValue) => options.onChange(id as FooterFixedBooleanSettingKey, newValue === "true"),
       options.onCancel,
     );
     this.addChild(new BorderedPanel(this.settingsList, options.borderColor));
@@ -108,7 +115,7 @@ export class FooterFixedSettingsPanel extends Container {
 export function showFooterFixedSettingsPanel(
   ctx: any,
   config: FooterFixedConfig,
-  onChange: (key: keyof FooterFixedConfig, value: boolean) => void,
+  onChange: (key: FooterFixedBooleanSettingKey, value: boolean) => void,
 ): Promise<void> {
   return ctx.ui.custom((_tui: any, theme: Theme, _keybindings: any, done: () => void) => {
     const panel = new FooterFixedSettingsPanel({
@@ -124,7 +131,7 @@ export function showFooterFixedSettingsPanel(
     overlayOptions: {
       anchor: "center",
       width: 64,
-      maxHeight: 16,
+      maxHeight: 18,
     },
   });
 }

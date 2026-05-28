@@ -17,11 +17,13 @@ test("task completion notifications are main interactive Windows or WSL agent on
   );
 });
 
-test("task completion notifications and editor chrome are enabled by default and configurable", () => {
+test("task completion notifications, editor chrome, and fast defaults are configurable", () => {
   assert.equal(parseFooterFixedConfig({}).taskCompletionNotification, true);
   assert.equal(parseFooterFixedConfig({ footerFixed: { taskCompletionNotification: false } }).taskCompletionNotification, false);
   assert.equal(parseFooterFixedConfig({}).editorChrome, true);
   assert.equal(parseFooterFixedConfig({ footerFixed: { editorChrome: false } }).editorChrome, false);
+  assert.equal(parseFooterFixedConfig({}).fast.enabled, false);
+  assert.equal(parseFooterFixedConfig({ footerFixed: { fast: { enabled: true, supportedModels: ["my-openai/gpt-5.5"] } } }).fast.supportedModels[0], "my-openai/gpt-5.5");
 });
 
 test("subagent processes are detected from pi-subagents environment", () => {
