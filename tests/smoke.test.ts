@@ -66,6 +66,20 @@ function createTempSettings() {
         systemIdentity: true,
         systemText: "You are Claude Code, Anthropic's official CLI for Claude.",
       },
+      codexCompat: {
+        providers: ["my-codex"],
+        supportedModels: ["my-codex/gpt-5.5"],
+        headers: {
+          Originator: "codex_cli_rs",
+          "User-Agent": "codex_cli_rs/test",
+          "OpenAI-Beta": "responses=experimental",
+          "X-Codex-Beta-Features": "remote_compaction_v2",
+          "X-Codex-Turn-Metadata": "",
+        },
+        metadataUserId: "pi-agent",
+        promptCacheKey: "pi-agent",
+        store: false,
+      },
     },
   }), "utf-8");
 
@@ -562,6 +576,38 @@ test("Claude Code compat config registers provider headers and patches provider 
         { role: "user", content: "hi" },
       ],
       metadata: { user_id: "pi-agent" },
+    });
+  });
+});
+
+test("Codex compat config registers provider headers and patches responses payload by default", async () => {
+  await withTempSettings(async ({ cwd }) => {
+    const harness = createHarness(cwd, { synchronousEditorComponent: true, synchronousFooter: true });
+    harness.ctx.model = { contextWindow: 200000, id: "gpt-5.5", provider: "my-codex", api: "openai-codex-responses" };
+    assert.ok(harness.sessionStart);
+    await harness.sessionStart({ reason: "new" }, harness.ctx);
+
+    const providerConfig = harness.providerRegistrations.get("my-codex") as { headers: Record<string, string> };
+    assert.equal(providerConfig.headers.Originator, "codex_cli_rs");
+    assert.equal(providerConfig.headers["User-Agent"], "codex_cli_rs/test");
+    assert.equal(providerConfig.headers["OpenAI-Beta"], "responses=experimental");
+    assert.equal(providerConfig.headers["X-Codex-Beta-Features"], "remote_compaction_v2");
+    assert.equal(providerConfig.headers.Session_id, "pi-agent");
+    assert.equal(JSON.parse(providerConfig.headers["X-Codex-Turn-Metadata"]).model, "gpt-5.5");
+    assert.equal(harness.statuses.get("footer-fixed-codex"), "Codex compat");
+
+    assert.deepEqual(await harness.emit("before_provider_request", {
+      payload: {
+        model: "gpt-5.5",
+        input: [{ role: "user", content: "hi" }],
+      },
+    }), {
+      model: "gpt-5.5",
+      input: [{ role: "user", content: "hi" }],
+      prompt_cache_key: "pi-agent",
+      store: false,
+      instructions: "",
+      client_metadata: { "x-codex-installation-id": "pi-agent" },
     });
   });
 });

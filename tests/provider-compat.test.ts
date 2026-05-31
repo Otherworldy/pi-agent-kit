@@ -1,15 +1,19 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import type { ClaudeCodeCompatConfig } from "../src/config.ts";
+import type { CodexCompatConfig, ProviderCompatConfig } from "../src/config.ts";
 import {
   getClaudeCodeCompatProviderNames,
+  getCodexCompatHeaders,
+  getCodexCompatProviderNames,
   matchesCompatModelSelector,
   patchClaudeCodeCompatPayload,
+  patchCodexCompatPayload,
   supportsClaudeCodeCompat,
+  supportsCodexCompat,
 } from "../src/provider-compat.ts";
 
-const baseConfig: ClaudeCodeCompatConfig = {
+const baseConfig: ProviderCompatConfig = {
   enabled: true,
   providers: ["my-claude"],
   supportedModels: ["my-claude/claude-sonnet", "other/*"],
@@ -17,6 +21,24 @@ const baseConfig: ClaudeCodeCompatConfig = {
   metadataUserId: "pi-agent",
   systemIdentity: true,
   systemText: "You are Claude Code, Anthropic's official CLI for Claude.",
+};
+
+const codexConfig: CodexCompatConfig = {
+  enabled: true,
+  providers: ["my-codex"],
+  supportedModels: ["my-codex/gpt-5.5"],
+  headers: {
+    Originator: "codex_cli_rs",
+    "User-Agent": "codex_cli_rs/test",
+    "OpenAI-Beta": "responses=experimental",
+    "X-Codex-Beta-Features": "remote_compaction_v2",
+    "X-Codex-Turn-Metadata": "",
+  },
+  metadataUserId: "pi-agent",
+  systemIdentity: false,
+  systemText: "You are Codex CLI, OpenAI's official coding agent.",
+  promptCacheKey: "pi-agent",
+  store: false,
 };
 
 test("Claude Code compat model selectors support exact, provider wildcard, model-only, and global wildcard", () => {
@@ -134,5 +156,84 @@ test("Claude Code compat returns undefined when nothing changes or model is unsu
   }, {
     config: baseConfig,
     model: { provider: "my-claude", id: "claude-sonnet" },
+  }), undefined);
+});
+
+test("Codex compat support and provider registration follow provider/model selectors", () => {
+  assert.equal(supportsCodexCompat({ provider: "my-codex", id: "gpt-5.5" }, codexConfig), true);
+  assert.equal(supportsCodexCompat({ provider: "my-codex", id: "gpt-5.4" }, codexConfig), false);
+  assert.deepEqual(getCodexCompatProviderNames(codexConfig, { provider: "active", id: "model" }), ["my-codex"]);
+  assert.deepEqual(getCodexCompatProviderNames({ ...codexConfig, supportedModels: ["*"] }, { provider: "active", id: "model" }).sort(), ["active", "my-codex"]);
+});
+
+test("Codex compat builds Codex CLI-like headers with turn metadata", () => {
+  const headers = getCodexCompatHeaders(codexConfig, { provider: "my-codex", id: "gpt-5.5" });
+
+  assert.equal(headers.Originator, "codex_cli_rs");
+  assert.equal(headers["User-Agent"], "codex_cli_rs/test");
+  assert.equal(headers["OpenAI-Beta"], "responses=experimental");
+  assert.equal(headers["X-Codex-Beta-Features"], "remote_compaction_v2");
+  assert.equal(headers.Session_id, "pi-agent");
+
+  const metadata = JSON.parse(headers["X-Codex-Turn-Metadata"]);
+  assert.equal(metadata.session_id, "pi-agent");
+  assert.equal(metadata.thread_id, "pi-agent");
+  assert.equal(metadata.request_kind, "turn");
+  assert.equal(metadata.model, "gpt-5.5");
+  assert.equal(typeof metadata.turn_id, "string");
+  assert.equal(typeof metadata.turn_started_at_unix_ms, "number");
+});
+
+test("Codex compat patches OpenAI Responses payloads without mutating originals", () => {
+  const payload = {
+    model: "gpt-5.5",
+    input: [{ role: "user", content: "hi" }],
+    max_output_tokens: 1024,
+  };
+
+  const patched = patchCodexCompatPayload(payload, {
+    config: codexConfig,
+    model: { provider: "my-codex", id: "gpt-5.5", api: "openai-codex-responses" },
+  });
+
+  assert.deepEqual(payload, {
+    model: "gpt-5.5",
+    input: [{ role: "user", content: "hi" }],
+    max_output_tokens: 1024,
+  });
+  assert.deepEqual(patched, {
+    model: "gpt-5.5",
+    input: [{ role: "user", content: "hi" }],
+    max_output_tokens: 1024,
+    prompt_cache_key: "pi-agent",
+    store: false,
+    instructions: "",
+    client_metadata: { "x-codex-installation-id": "pi-agent" },
+  });
+});
+
+test("Codex compat can prepend optional instructions and skips non-responses payloads", () => {
+  assert.deepEqual(patchCodexCompatPayload({
+    model: "gpt-5.5",
+    instructions: "Base instructions",
+    input: [{ role: "user", content: "hi" }],
+  }, {
+    config: { ...codexConfig, systemIdentity: true },
+    model: { provider: "my-codex", id: "gpt-5.5", api: "openai-responses" },
+  }), {
+    model: "gpt-5.5",
+    instructions: "You are Codex CLI, OpenAI's official coding agent.\nBase instructions",
+    input: [{ role: "user", content: "hi" }],
+    prompt_cache_key: "pi-agent",
+    store: false,
+    client_metadata: { "x-codex-installation-id": "pi-agent" },
+  });
+
+  assert.equal(patchCodexCompatPayload({
+    model: "gpt-5.5",
+    messages: [{ role: "user", content: "hi" }],
+  }, {
+    config: codexConfig,
+    model: { provider: "my-codex", id: "gpt-5.5", api: "openai-completions" },
   }), undefined);
 });

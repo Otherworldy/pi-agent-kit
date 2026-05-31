@@ -1,4 +1,6 @@
-import type { ClaudeCodeCompatConfig } from "./config.ts";
+import { randomUUID } from "node:crypto";
+
+import type { CodexCompatConfig, ProviderCompatConfig } from "./config.ts";
 
 export interface ProviderCompatModelLike {
   id?: string;
@@ -45,9 +47,9 @@ export function matchesCompatModelSelector(
   return providerMatches && modelMatches;
 }
 
-export function supportsClaudeCodeCompat(
+export function supportsProviderCompat(
   model: ProviderCompatModelLike | null | undefined,
-  config: ClaudeCodeCompatConfig,
+  config: ProviderCompatConfig,
 ): boolean {
   if (!config.enabled || !model?.id) return false;
   if (config.supportedModels.length > 0) {
@@ -59,8 +61,22 @@ export function supportsClaudeCodeCompat(
   return true;
 }
 
-export function getClaudeCodeCompatProviderNames(
-  config: ClaudeCodeCompatConfig,
+export function supportsClaudeCodeCompat(
+  model: ProviderCompatModelLike | null | undefined,
+  config: ProviderCompatConfig,
+): boolean {
+  return supportsProviderCompat(model, config);
+}
+
+export function supportsCodexCompat(
+  model: ProviderCompatModelLike | null | undefined,
+  config: CodexCompatConfig,
+): boolean {
+  return supportsProviderCompat(model, config);
+}
+
+export function getProviderCompatProviderNames(
+  config: ProviderCompatConfig,
   model: ProviderCompatModelLike | null | undefined,
 ): string[] {
   if (!config.enabled) return [];
@@ -80,11 +96,25 @@ export function getClaudeCodeCompatProviderNames(
     }
   }
 
-  if (supportsClaudeCodeCompat(model, config) && model?.provider) {
+  if (supportsProviderCompat(model, config) && model?.provider) {
     providers.add(model.provider);
   }
 
   return [...providers];
+}
+
+export function getClaudeCodeCompatProviderNames(
+  config: ProviderCompatConfig,
+  model: ProviderCompatModelLike | null | undefined,
+): string[] {
+  return getProviderCompatProviderNames(config, model);
+}
+
+export function getCodexCompatProviderNames(
+  config: CodexCompatConfig,
+  model: ProviderCompatModelLike | null | undefined,
+): string[] {
+  return getProviderCompatProviderNames(config, model);
 }
 
 function textContentIncludes(value: unknown, needle: string): boolean {
@@ -166,7 +196,7 @@ function withMetadataUserId(
 export function patchClaudeCodeCompatPayload(
   payload: unknown,
   options: {
-    config: ClaudeCodeCompatConfig;
+    config: ProviderCompatConfig;
     model: ProviderCompatModelLike | null | undefined;
   },
 ): unknown | undefined {
@@ -194,6 +224,158 @@ export function patchClaudeCodeCompatPayload(
         nextPayload = withSystem;
         changed = true;
       }
+    }
+  }
+
+  return changed ? nextPayload : undefined;
+}
+
+function isOpenAIResponsesPayload(payload: Record<string, unknown>, model: ProviderCompatModelLike | null | undefined): boolean {
+  return model?.api === "openai-responses"
+    || model?.api === "openai-codex-responses"
+    || hasOwn(payload, "input")
+    || hasOwn(payload, "instructions");
+}
+
+function stableCompatId(seed: string): string {
+  let hash = 2166136261;
+  for (let i = 0; i < seed.length; i += 1) {
+    hash ^= seed.charCodeAt(i);
+    hash = Math.imul(hash, 16777619) >>> 0;
+  }
+  return [
+    hash.toString(16).padStart(8, "0"),
+    "0000",
+    "4000",
+    "8000",
+    "000000000000",
+  ].join("-");
+}
+
+function getCodexSessionId(config: CodexCompatConfig): string {
+  return config.metadataUserId.trim() || config.promptCacheKey.trim() || "pi-agent";
+}
+
+function getCodexPromptCacheKey(config: CodexCompatConfig, sessionId: string): string {
+  return config.promptCacheKey.trim() || sessionId;
+}
+
+function withCodexHeaders(
+  headers: Record<string, string>,
+  sessionId: string,
+  promptCacheKey: string,
+  model: ProviderCompatModelLike | null | undefined,
+): Record<string, string> {
+  const nextHeaders = { ...headers };
+  if (!nextHeaders.Session_id) nextHeaders.Session_id = promptCacheKey;
+  if (!nextHeaders["X-Codex-Turn-Metadata"]) {
+    const metadata: Record<string, unknown> = {
+      session_id: sessionId,
+      thread_id: promptCacheKey,
+      turn_id: randomUUID(),
+      request_kind: "turn",
+      window_id: stableCompatId(`${promptCacheKey}:0`),
+      sandbox: "none",
+      turn_started_at_unix_ms: Date.now(),
+    };
+    if (model?.id) metadata.model = model.id;
+    nextHeaders["X-Codex-Turn-Metadata"] = JSON.stringify(metadata);
+  }
+  return nextHeaders;
+}
+
+export function getCodexCompatHeaders(
+  config: CodexCompatConfig,
+  model?: ProviderCompatModelLike | null | undefined,
+): Record<string, string> {
+  const sessionId = getCodexSessionId(config);
+  const promptCacheKey = getCodexPromptCacheKey(config, sessionId);
+  return withCodexHeaders(config.headers, sessionId, promptCacheKey, model);
+}
+
+function withCodexInstructions(
+  payload: Record<string, unknown>,
+  systemText: string,
+): Record<string, unknown> | undefined {
+  if (!systemText) return undefined;
+
+  const instructions = payload.instructions;
+  if (typeof instructions === "string") {
+    if (instructions.includes(systemText)) return undefined;
+    return { ...payload, instructions: instructions ? `${systemText}\n${instructions}` : systemText };
+  }
+  if (instructions === undefined || instructions === null) {
+    return { ...payload, instructions: systemText };
+  }
+  return undefined;
+}
+
+function withCodexPayloadDefaults(
+  payload: Record<string, unknown>,
+  config: CodexCompatConfig,
+): Record<string, unknown> | undefined {
+  const sessionId = getCodexSessionId(config);
+  const promptCacheKey = getCodexPromptCacheKey(config, sessionId);
+  const clientMetadata = isRecord(payload.client_metadata) ? payload.client_metadata : {};
+
+  let nextPayload: Record<string, unknown> = payload;
+  let changed = false;
+
+  if (payload.prompt_cache_key !== promptCacheKey) {
+    nextPayload = { ...nextPayload, prompt_cache_key: promptCacheKey };
+    changed = true;
+  }
+
+  if (payload.store !== config.store) {
+    nextPayload = { ...nextPayload, store: config.store };
+    changed = true;
+  }
+
+  if (clientMetadata["x-codex-installation-id"] !== sessionId) {
+    nextPayload = {
+      ...nextPayload,
+      client_metadata: {
+        ...clientMetadata,
+        "x-codex-installation-id": sessionId,
+      },
+    };
+    changed = true;
+  }
+
+  if (!hasOwn(nextPayload, "instructions")) {
+    nextPayload = { ...nextPayload, instructions: "" };
+    changed = true;
+  }
+
+  return changed ? nextPayload : undefined;
+}
+
+export function patchCodexCompatPayload(
+  payload: unknown,
+  options: {
+    config: CodexCompatConfig;
+    model: ProviderCompatModelLike | null | undefined;
+  },
+): unknown | undefined {
+  const { config, model } = options;
+  if (!supportsCodexCompat(model, config) || !isRecord(payload) || !isOpenAIResponsesPayload(payload, model)) {
+    return undefined;
+  }
+
+  let nextPayload: Record<string, unknown> = payload;
+  let changed = false;
+
+  const defaultsPayload = withCodexPayloadDefaults(nextPayload, config);
+  if (defaultsPayload) {
+    nextPayload = defaultsPayload;
+    changed = true;
+  }
+
+  if (config.systemIdentity) {
+    const withInstructions = withCodexInstructions(nextPayload, config.systemText.trim());
+    if (withInstructions) {
+      nextPayload = withInstructions;
+      changed = true;
     }
   }
 

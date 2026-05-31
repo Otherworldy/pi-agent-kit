@@ -25,8 +25,12 @@ import {
 } from "./fast-mode.ts";
 import {
   getClaudeCodeCompatProviderNames,
+  getCodexCompatHeaders,
+  getCodexCompatProviderNames,
   patchClaudeCodeCompatPayload,
+  patchCodexCompatPayload,
   supportsClaudeCodeCompat,
+  supportsCodexCompat,
 } from "./provider-compat.ts";
 import { renderEditorChrome } from "./editor-chrome.ts";
 import { renderFixedEditorCluster } from "./fixed-editor/cluster.ts";
@@ -65,6 +69,17 @@ let config: FooterFixedConfig = {
     metadataUserId: "pi-agent",
     systemIdentity: true,
     systemText: "You are Claude Code, Anthropic's official CLI for Claude.",
+  },
+  codexCompat: {
+    enabled: false,
+    providers: [],
+    supportedModels: [],
+    headers: {},
+    metadataUserId: "pi-agent",
+    systemIdentity: false,
+    systemText: "You are Codex CLI, OpenAI's official coding agent.",
+    promptCacheKey: "pi-agent",
+    store: false,
   },
 };
 
@@ -146,7 +161,8 @@ export default function footerFixedPlugin(pi: ExtensionAPI) {
   const installStabilizationTimers = new Set<ReturnType<typeof setTimeout>>();
   let fastDesired = false;
   let registeredClaudeCodeCompatProviders = new Set<string>();
-  const previousClaudeCodeCompatProviderConfigs = new Map<string, { apiKey?: string; authHeader?: boolean; headers?: Record<string, string> } | null>();
+  let registeredCodexCompatProviders = new Set<string>();
+  const previousCompatProviderConfigs = new Map<string, { apiKey?: string; authHeader?: boolean; headers?: Record<string, string> } | null>();
   let currentModelRef: any = null;
 
   function teardownFixedEditorCompositor(options?: { resetExtendedKeyboardModes?: boolean }) {
@@ -400,9 +416,24 @@ export default function footerFixedPlugin(pi: ExtensionAPI) {
     ctx.ui.setStatus("footer-fixed-claude-code", ctx.ui.theme?.fg?.(color, label) ?? label);
   }
 
+  function updateCodexCompatStatus(ctx: any): void {
+    if (!ctx?.hasUI || typeof ctx.ui?.setStatus !== "function") return;
+
+    if (!config.codexCompat.enabled) {
+      ctx.ui.setStatus("footer-fixed-codex", undefined);
+      return;
+    }
+
+    const active = supportsCodexCompat(activeModel(ctx), config.codexCompat);
+    const label = active ? "Codex compat" : "Codex compat*";
+    const color = active ? "accent" : "warning";
+    ctx.ui.setStatus("footer-fixed-codex", ctx.ui.theme?.fg?.(color, label) ?? label);
+  }
+
   function updateProviderStatuses(ctx: any): void {
     updateFastStatus(ctx);
     updateClaudeCodeCompatStatus(ctx);
+    updateCodexCompatStatus(ctx);
   }
 
   function readProviderRequestConfig(ctx: any, provider: string): { apiKey?: string; authHeader?: boolean; headers?: Record<string, string> } | null {
@@ -431,37 +462,52 @@ export default function footerFixedPlugin(pi: ExtensionAPI) {
         headers: requestConfig?.headers ?? {},
       });
     } catch (error) {
-      console.debug(`[pi-footer-fixed] Failed to update Claude Code compat provider ${provider}:`, error);
-      notify(ctx, `Claude Code compat provider update failed for ${provider}`, "warning");
+      console.debug(`[pi-footer-fixed] Failed to update provider compat config for ${provider}:`, error);
+      notify(ctx, `Provider compatibility update failed for ${provider}`, "warning");
     }
   }
 
-  function registerClaudeCodeCompatProviders(ctx?: any): void {
-    const providers = new Set(getClaudeCodeCompatProviderNames(config.claudeCodeCompat, activeModel(ctx)));
-
-    for (const provider of registeredClaudeCodeCompatProviders) {
-      if (!providers.has(provider)) {
-        writeProviderRequestConfig(ctx, provider, previousClaudeCodeCompatProviderConfigs.get(provider) ?? null);
-        previousClaudeCodeCompatProviderConfigs.delete(provider);
+  function restoreUnusedCompatProviders(ctx: any, nextProviders: Set<string>): void {
+    for (const provider of [...previousCompatProviderConfigs.keys()]) {
+      if (!nextProviders.has(provider)) {
+        writeProviderRequestConfig(ctx, provider, previousCompatProviderConfigs.get(provider) ?? null);
+        previousCompatProviderConfigs.delete(provider);
       }
     }
+  }
+
+  function registerProviderCompatProviders(ctx?: any): void {
+    const claudeProviders = new Set(getClaudeCodeCompatProviderNames(config.claudeCodeCompat, activeModel(ctx)));
+    const codexProviders = new Set(getCodexCompatProviderNames(config.codexCompat, activeModel(ctx)));
+    const providers = new Set([...claudeProviders, ...codexProviders]);
+
+    restoreUnusedCompatProviders(ctx, providers);
 
     for (const provider of providers) {
-      if (!previousClaudeCodeCompatProviderConfigs.has(provider)) {
-        previousClaudeCodeCompatProviderConfigs.set(provider, readProviderRequestConfig(ctx, provider));
+      if (!previousCompatProviderConfigs.has(provider)) {
+        previousCompatProviderConfigs.set(provider, readProviderRequestConfig(ctx, provider));
       }
-      const previousConfig = previousClaudeCodeCompatProviderConfigs.get(provider);
+      const previousConfig = previousCompatProviderConfigs.get(provider);
       writeProviderRequestConfig(ctx, provider, {
         ...previousConfig,
-        headers: { ...previousConfig?.headers, ...config.claudeCodeCompat.headers },
+        headers: {
+          ...previousConfig?.headers,
+          ...(claudeProviders.has(provider) ? config.claudeCodeCompat.headers : {}),
+          ...(codexProviders.has(provider) ? getCodexCompatHeaders(config.codexCompat, activeModel(ctx)) : {}),
+        },
       });
     }
 
-    registeredClaudeCodeCompatProviders = providers;
+    registeredClaudeCodeCompatProviders = claudeProviders;
+    registeredCodexCompatProviders = codexProviders;
   }
 
   function getRegisteredClaudeCodeCompatProviders(): string[] {
     return [...registeredClaudeCodeCompatProviders].sort();
+  }
+
+  function getRegisteredCodexCompatProviders(): string[] {
+    return [...registeredCodexCompatProviders].sort();
   }
 
   function installWhenTuiReady(ctx: any, tui: any) {
@@ -610,7 +656,7 @@ export default function footerFixedPlugin(pi: ExtensionAPI) {
     config = parseFooterFixedConfig(readSettings(ctx.cwd));
     fastDesired = config.fast.enabled || pi.getFlag?.("fast") === true;
     config.fast.enabled = fastDesired;
-    registerClaudeCodeCompatProviders(ctx);
+    registerProviderCompatProviders(ctx);
     updateProviderStatuses(ctx);
   }
 
@@ -632,10 +678,13 @@ export default function footerFixedPlugin(pi: ExtensionAPI) {
         config.fast.supportedModels,
         config.fast.serviceTier,
       );
-      const compatStatus = config.claudeCodeCompat.enabled
+      const claudeCompatStatus = config.claudeCodeCompat.enabled
         ? `Claude Code compat is on for providers: ${getRegisteredClaudeCodeCompatProviders().join(", ") || "active model only"}.`
         : "Claude Code compat is off.";
-      notify(ctx, `${fastStatus}\n${compatStatus}`, "info");
+      const codexCompatStatus = config.codexCompat.enabled
+        ? `Codex compat is on for providers: ${getRegisteredCodexCompatProviders().join(", ") || "active model only"}.`
+        : "Codex compat is off.";
+      notify(ctx, `${fastStatus}\n${claudeCompatStatus}\n${codexCompatStatus}`, "info");
       return;
     }
 
@@ -669,7 +718,12 @@ export default function footerFixedPlugin(pi: ExtensionAPI) {
       model: currentModelRef,
     });
 
-    return claudeCodePayload ?? fastPayload;
+    const codexPayload = patchCodexCompatPayload(claudeCodePayload ?? fastPayload ?? event.payload, {
+      config: config.codexCompat,
+      model: currentModelRef,
+    });
+
+    return codexPayload ?? claudeCodePayload ?? fastPayload;
   });
 
   pi.on("session_start", async (_event, ctx) => {
@@ -685,7 +739,7 @@ export default function footerFixedPlugin(pi: ExtensionAPI) {
     currentModelRef = ctx.model;
     fastDesired = config.fast.enabled || pi.getFlag?.("fast") === true;
     config.fast.enabled = fastDesired;
-    registerClaudeCodeCompatProviders(ctx);
+    registerProviderCompatProviders(ctx);
     updateProviderStatuses(ctx);
 
     if (!ctx.hasUI) return;
@@ -707,7 +761,7 @@ export default function footerFixedPlugin(pi: ExtensionAPI) {
   pi.on("model_select", async (event, ctx) => {
     activeCtxRef = ctx;
     currentModelRef = event.model ?? ctx.model;
-    registerClaudeCodeCompatProviders(ctx);
+    registerProviderCompatProviders(ctx);
     updateProviderStatuses(ctx);
     if (ctx.hasUI) {
       fixedEditorCompositor?.requestRepaint();
@@ -727,11 +781,13 @@ export default function footerFixedPlugin(pi: ExtensionAPI) {
     teardownFixedEditorCompositor({ resetExtendedKeyboardModes: true });
     ctx?.ui?.setStatus?.("footer-fixed-fast", undefined);
     ctx?.ui?.setStatus?.("footer-fixed-claude-code", undefined);
-    for (const provider of registeredClaudeCodeCompatProviders) {
-      writeProviderRequestConfig(ctx, provider, previousClaudeCodeCompatProviderConfigs.get(provider) ?? null);
+    ctx?.ui?.setStatus?.("footer-fixed-codex", undefined);
+    for (const [provider, previousConfig] of previousCompatProviderConfigs.entries()) {
+      writeProviderRequestConfig(ctx, provider, previousConfig);
     }
-    previousClaudeCodeCompatProviderConfigs.clear();
+    previousCompatProviderConfigs.clear();
     registeredClaudeCodeCompatProviders = new Set<string>();
+    registeredCodexCompatProviders = new Set<string>();
     tuiRef = null;
     currentEditor = null;
     activeCtxRef = null;

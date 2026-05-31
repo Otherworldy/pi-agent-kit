@@ -27,6 +27,9 @@ test("task completion notifications, editor chrome, and fast defaults are config
   assert.equal(parseFooterFixedConfig({}).claudeCodeCompat.enabled, false);
   assert.equal(parseFooterFixedConfig({ footerFixed: { claudeCodeCompat: { providers: ["my-claude"] } } }).claudeCodeCompat.enabled, true);
   assert.equal(parseFooterFixedConfig({ footerFixed: { claudeCodeCompat: { enabled: false, providers: ["my-claude"] } } }).claudeCodeCompat.enabled, false);
+  assert.equal(parseFooterFixedConfig({}).codexCompat.enabled, false);
+  assert.equal(parseFooterFixedConfig({ footerFixed: { codexCompat: { providers: ["my-codex"] } } }).codexCompat.enabled, true);
+  assert.equal(parseFooterFixedConfig({ footerFixed: { codexCompat: { enabled: false, providers: ["my-codex"] } } }).codexCompat.enabled, false);
 });
 
 test("subagent processes are detected from pi-subagents environment", () => {

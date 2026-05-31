@@ -9,7 +9,7 @@ export interface FastModeConfig {
   supportedModels: string[];
 }
 
-export interface ClaudeCodeCompatConfig {
+export interface ProviderCompatConfig {
   enabled: boolean;
   providers: string[];
   supportedModels: string[];
@@ -19,6 +19,11 @@ export interface ClaudeCodeCompatConfig {
   systemText: string;
 }
 
+export interface CodexCompatConfig extends ProviderCompatConfig {
+  promptCacheKey: string;
+  store: boolean;
+}
+
 export interface FooterFixedConfig {
   fixedEditor: boolean;
   mouseScroll: boolean;
@@ -26,7 +31,8 @@ export interface FooterFixedConfig {
   taskCompletionNotification: boolean;
   editorChrome: boolean;
   fast: FastModeConfig;
-  claudeCodeCompat: ClaudeCodeCompatConfig;
+  claudeCodeCompat: ProviderCompatConfig;
+  codexCompat: CodexCompatConfig;
 }
 
 export type FooterFixedBooleanSettingKey =
@@ -37,9 +43,10 @@ export type FooterFixedBooleanSettingKey =
   | "editorChrome"
   | "fast.enabled";
 
-export type FooterFixedConfigUpdates = Partial<Omit<FooterFixedConfig, "fast" | "claudeCodeCompat">> & {
+export type FooterFixedConfigUpdates = Partial<Omit<FooterFixedConfig, "fast" | "claudeCodeCompat" | "codexCompat">> & {
   fast?: Partial<FastModeConfig>;
-  claudeCodeCompat?: Partial<ClaudeCodeCompatConfig>;
+  claudeCodeCompat?: Partial<ProviderCompatConfig>;
+  codexCompat?: Partial<CodexCompatConfig>;
 };
 
 export const DEFAULT_FAST_SUPPORTED_MODELS = [
@@ -67,6 +74,16 @@ export const DEFAULT_CLAUDE_CODE_COMPAT_HEADERS = {
 
 export const DEFAULT_CLAUDE_CODE_SYSTEM_TEXT = "You are Claude Code, Anthropic's official CLI for Claude.";
 
+export const DEFAULT_CODEX_COMPAT_HEADERS = {
+  Originator: process.env.PI_CODEX_COMPAT_ORIGINATOR || "codex_cli_rs",
+  "User-Agent": process.env.PI_CODEX_COMPAT_USER_AGENT || `codex_cli_rs/${process.env.PI_CODEX_COMPAT_VERSION || "0.132.0"} (${process.platform}; ${process.arch}) node`,
+  "OpenAI-Beta": "responses=experimental",
+  "X-Codex-Beta-Features": process.env.PI_CODEX_COMPAT_BETA_FEATURES || "",
+  "X-Codex-Turn-Metadata": "",
+} as const;
+
+export const DEFAULT_CODEX_SYSTEM_TEXT = "You are Codex CLI, OpenAI's official coding agent.";
+
 const DEFAULT_CONFIG: FooterFixedConfig = {
   fixedEditor: true,
   mouseScroll: true,
@@ -87,6 +104,17 @@ const DEFAULT_CONFIG: FooterFixedConfig = {
     metadataUserId: "pi-agent",
     systemIdentity: true,
     systemText: DEFAULT_CLAUDE_CODE_SYSTEM_TEXT,
+  },
+  codexCompat: {
+    enabled: false,
+    providers: [],
+    supportedModels: [],
+    headers: { ...DEFAULT_CODEX_COMPAT_HEADERS },
+    metadataUserId: "pi-agent",
+    systemIdentity: false,
+    systemText: DEFAULT_CODEX_SYSTEM_TEXT,
+    promptCacheKey: "pi-agent",
+    store: false,
   },
 };
 
@@ -201,23 +229,33 @@ function parseFastConfig(footerFixed: unknown): FastModeConfig {
   };
 }
 
-function parseClaudeCodeCompatConfig(footerFixed: unknown): ClaudeCodeCompatConfig {
-  const claudeCodeCompat = isRecord(footerFixed) ? footerFixed.claudeCodeCompat : undefined;
-  const configured = isRecord(claudeCodeCompat);
+function parseProviderCompatConfig(
+  footerFixed: unknown,
+  key: "claudeCodeCompat" | "codexCompat",
+): ProviderCompatConfig {
+  const rawConfig = isRecord(footerFixed) ? footerFixed[key] : undefined;
+  const configured = isRecord(rawConfig);
+  const defaults = DEFAULT_CONFIG[key];
 
   return {
-    enabled: configured ? (boolFromObject(claudeCodeCompat, "enabled") ?? true) : DEFAULT_CONFIG.claudeCodeCompat.enabled,
-    providers: stringArrayFromObject(claudeCodeCompat, "providers", DEFAULT_CONFIG.claudeCodeCompat.providers),
-    supportedModels: stringArrayFromObject(
-      claudeCodeCompat,
-      "supportedModels",
-      DEFAULT_CONFIG.claudeCodeCompat.supportedModels,
-    ),
-    headers: stringRecordFromObject(claudeCodeCompat, "headers", DEFAULT_CONFIG.claudeCodeCompat.headers),
-    metadataUserId: stringFromObject(claudeCodeCompat, "metadataUserId", DEFAULT_CONFIG.claudeCodeCompat.metadataUserId),
-    systemIdentity: boolFromObject(claudeCodeCompat, "systemIdentity")
-      ?? DEFAULT_CONFIG.claudeCodeCompat.systemIdentity,
-    systemText: stringFromObject(claudeCodeCompat, "systemText", DEFAULT_CONFIG.claudeCodeCompat.systemText),
+    enabled: configured ? (boolFromObject(rawConfig, "enabled") ?? true) : defaults.enabled,
+    providers: stringArrayFromObject(rawConfig, "providers", defaults.providers),
+    supportedModels: stringArrayFromObject(rawConfig, "supportedModels", defaults.supportedModels),
+    headers: stringRecordFromObject(rawConfig, "headers", defaults.headers),
+    metadataUserId: stringFromObject(rawConfig, "metadataUserId", defaults.metadataUserId),
+    systemIdentity: boolFromObject(rawConfig, "systemIdentity") ?? defaults.systemIdentity,
+    systemText: stringFromObject(rawConfig, "systemText", defaults.systemText),
+  };
+}
+
+function parseCodexCompatConfig(footerFixed: unknown): CodexCompatConfig {
+  const base = parseProviderCompatConfig(footerFixed, "codexCompat");
+  const rawConfig = isRecord(footerFixed) ? footerFixed.codexCompat : undefined;
+
+  return {
+    ...base,
+    promptCacheKey: stringFromObject(rawConfig, "promptCacheKey", DEFAULT_CONFIG.codexCompat.promptCacheKey),
+    store: boolFromObject(rawConfig, "store") ?? DEFAULT_CONFIG.codexCompat.store,
   };
 }
 
@@ -239,7 +277,8 @@ export function parseFooterFixedConfig(settings: Record<string, unknown>): Foote
     editorChrome: boolFromObject(footerFixed, "editorChrome")
       ?? DEFAULT_CONFIG.editorChrome,
     fast: parseFastConfig(footerFixed),
-    claudeCodeCompat: parseClaudeCodeCompatConfig(footerFixed),
+    claudeCodeCompat: parseProviderCompatConfig(footerFixed, "claudeCodeCompat"),
+    codexCompat: parseCodexCompatConfig(footerFixed),
   };
 }
 
