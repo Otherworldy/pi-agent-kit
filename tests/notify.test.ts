@@ -24,6 +24,9 @@ test("task completion notifications, editor chrome, and fast defaults are config
   assert.equal(parseFooterFixedConfig({ footerFixed: { editorChrome: false } }).editorChrome, false);
   assert.equal(parseFooterFixedConfig({}).fast.enabled, false);
   assert.equal(parseFooterFixedConfig({ footerFixed: { fast: { enabled: true, supportedModels: ["my-openai/gpt-5.5"] } } }).fast.supportedModels[0], "my-openai/gpt-5.5");
+  assert.equal(parseFooterFixedConfig({}).claudeCodeCompat.enabled, false);
+  assert.equal(parseFooterFixedConfig({ footerFixed: { claudeCodeCompat: { providers: ["my-claude"] } } }).claudeCodeCompat.enabled, true);
+  assert.equal(parseFooterFixedConfig({ footerFixed: { claudeCodeCompat: { enabled: false, providers: ["my-claude"] } } }).claudeCodeCompat.enabled, false);
 });
 
 test("subagent processes are detected from pi-subagents environment", () => {

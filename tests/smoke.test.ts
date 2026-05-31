@@ -55,6 +55,17 @@ function createTempSettings() {
         serviceTier: "priority",
         supportedModels: ["my-openai/gpt-5.5"],
       },
+      claudeCodeCompat: {
+        providers: ["my-openai"],
+        supportedModels: ["my-openai/gpt-5.5"],
+        headers: {
+          "User-Agent": "claude-cli/test",
+          "X-App": "cli",
+        },
+        metadataUserId: "pi-agent",
+        systemIdentity: true,
+        systemText: "You are Claude Code, Anthropic's official CLI for Claude.",
+      },
     },
   }), "utf-8");
 
@@ -104,6 +115,7 @@ function createHarness(cwd: string, options: { synchronousEditorComponent?: bool
   const widgetCalls: Array<{ key: string; content: unknown; options: unknown }> = [];
   const statuses = new Map<string, string>();
   const flags = new Map<string, boolean | string>();
+  const providerRegistrations = new Map<string, unknown>();
   const editorFactories: unknown[] = [];
   const terminal = new FakeTerminal();
   const statusContainer = { render: () => [] as string[] };
@@ -198,6 +210,12 @@ function createHarness(cwd: string, options: { synchronousEditorComponent?: bool
     getThinkingLevel() {
       return thinkingLevel;
     },
+    registerProvider(name: string, providerConfig: unknown) {
+      providerRegistrations.set(name, providerConfig);
+    },
+    unregisterProvider(name: string) {
+      providerRegistrations.delete(name);
+    },
   };
 
   footerFixedPlugin(api as never);
@@ -208,7 +226,7 @@ function createHarness(cwd: string, options: { synchronousEditorComponent?: bool
     ui,
     model: { contextWindow: 200000, id: "gpt-5.5", provider: "my-openai", api: "openai-responses" },
     sessionManager: { getEntries: () => [] },
-    modelRegistry: {},
+    modelRegistry: { providerRequestConfigs: new Map<string, unknown>() },
     getContextUsage: () => ({ contextWindow: 200000, percent: 42, tokens: 84000 }),
   };
 
@@ -246,6 +264,7 @@ function createHarness(cwd: string, options: { synchronousEditorComponent?: bool
     handlers,
     commands,
     flags,
+    providerRegistrations,
     tui,
     terminal,
     editorContainer,
@@ -495,6 +514,11 @@ test("settings overlay persists editor chrome toggle", async () => {
 
 test("fast command toggles status, editor chrome label, and provider payload", async () => {
   await withTempSettings(async ({ cwd }) => {
+    const settingsPath = join(cwd, ".pi", "settings.json");
+    const settingsBefore = JSON.parse(readFileSync(settingsPath, "utf-8"));
+    delete settingsBefore.footerFixed.claudeCodeCompat;
+    writeFileSync(settingsPath, JSON.stringify(settingsBefore), "utf-8");
+
     const harness = createHarness(cwd, { synchronousEditorComponent: true, synchronousFooter: true });
     assert.ok(harness.sessionStart);
     await harness.sessionStart({ reason: "new" }, harness.ctx);
@@ -509,7 +533,35 @@ test("fast command toggles status, editor chrome label, and provider payload", a
       service_tier: "priority",
     });
 
-    const settings = JSON.parse(readFileSync(join(cwd, ".pi", "settings.json"), "utf-8"));
+    const settings = JSON.parse(readFileSync(settingsPath, "utf-8"));
     assert.equal(settings.footerFixed.fast.enabled, true);
+  });
+});
+
+test("Claude Code compat config registers provider headers and patches provider payload by default", async () => {
+  await withTempSettings(async ({ cwd }) => {
+    const harness = createHarness(cwd, { synchronousEditorComponent: true, synchronousFooter: true });
+    assert.ok(harness.sessionStart);
+    await harness.sessionStart({ reason: "new" }, harness.ctx);
+
+    const providerConfig = harness.providerRegistrations.get("my-openai") as { headers: Record<string, string> };
+    assert.equal(providerConfig.headers["User-Agent"], "claude-cli/test");
+    assert.equal(providerConfig.headers["X-App"], "cli");
+    assert.equal(providerConfig.headers["Anthropic-Version"], "2023-06-01");
+    assert.equal(providerConfig.headers["Anthropic-Beta"], "claude-code-20250219,interleaved-thinking-2025-05-14");
+    assert.equal(harness.statuses.get("footer-fixed-claude-code"), "CC compat");
+    assert.deepEqual(await harness.emit("before_provider_request", {
+      payload: {
+        model: "gpt-5.5",
+        messages: [{ role: "user", content: "hi" }],
+      },
+    }), {
+      model: "gpt-5.5",
+      messages: [
+        { role: "system", content: "You are Claude Code, Anthropic's official CLI for Claude." },
+        { role: "user", content: "hi" },
+      ],
+      metadata: { user_id: "pi-agent" },
+    });
   });
 });

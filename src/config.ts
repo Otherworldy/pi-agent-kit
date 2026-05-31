@@ -9,6 +9,16 @@ export interface FastModeConfig {
   supportedModels: string[];
 }
 
+export interface ClaudeCodeCompatConfig {
+  enabled: boolean;
+  providers: string[];
+  supportedModels: string[];
+  headers: Record<string, string>;
+  metadataUserId: string;
+  systemIdentity: boolean;
+  systemText: string;
+}
+
 export interface FooterFixedConfig {
   fixedEditor: boolean;
   mouseScroll: boolean;
@@ -16,6 +26,7 @@ export interface FooterFixedConfig {
   taskCompletionNotification: boolean;
   editorChrome: boolean;
   fast: FastModeConfig;
+  claudeCodeCompat: ClaudeCodeCompatConfig;
 }
 
 export type FooterFixedBooleanSettingKey =
@@ -26,8 +37,9 @@ export type FooterFixedBooleanSettingKey =
   | "editorChrome"
   | "fast.enabled";
 
-export type FooterFixedConfigUpdates = Partial<Omit<FooterFixedConfig, "fast">> & {
+export type FooterFixedConfigUpdates = Partial<Omit<FooterFixedConfig, "fast" | "claudeCodeCompat">> & {
   fast?: Partial<FastModeConfig>;
+  claudeCodeCompat?: Partial<ClaudeCodeCompatConfig>;
 };
 
 export const DEFAULT_FAST_SUPPORTED_MODELS = [
@@ -36,6 +48,24 @@ export const DEFAULT_FAST_SUPPORTED_MODELS = [
   "openai-codex/gpt-5.4",
   "openai-codex/gpt-5.5",
 ] as const;
+
+export const DEFAULT_CLAUDE_CODE_COMPAT_HEADERS = {
+  "User-Agent": "claude-cli/2.1.75 (external, cli)",
+  "X-App": "cli",
+  "X-Stainless-Arch": process.env.PI_CLAUDE_CODE_COMPAT_ARCH || process.arch,
+  "X-Stainless-Lang": "js",
+  "X-Stainless-Os": process.env.PI_CLAUDE_CODE_COMPAT_OS || process.platform,
+  "X-Stainless-Package-Version": process.env.PI_CLAUDE_CODE_COMPAT_VERSION || "2.1.75",
+  "X-Stainless-Retry-Count": "0",
+  "X-Stainless-Runtime": "node",
+  "X-Stainless-Runtime-Version": process.env.PI_CLAUDE_CODE_COMPAT_RUNTIME_VERSION || process.versions.node,
+  "X-Stainless-Timeout": "600",
+  "Anthropic-Version": "2023-06-01",
+  "Anthropic-Dangerous-Direct-Browser-Access": "true",
+  "Anthropic-Beta": "claude-code-20250219,interleaved-thinking-2025-05-14",
+} as const;
+
+export const DEFAULT_CLAUDE_CODE_SYSTEM_TEXT = "You are Claude Code, Anthropic's official CLI for Claude.";
 
 const DEFAULT_CONFIG: FooterFixedConfig = {
   fixedEditor: true,
@@ -48,6 +78,15 @@ const DEFAULT_CONFIG: FooterFixedConfig = {
     persistState: true,
     serviceTier: "priority",
     supportedModels: [...DEFAULT_FAST_SUPPORTED_MODELS],
+  },
+  claudeCodeCompat: {
+    enabled: false,
+    providers: [],
+    supportedModels: [],
+    headers: { ...DEFAULT_CLAUDE_CODE_COMPAT_HEADERS },
+    metadataUserId: "pi-agent",
+    systemIdentity: true,
+    systemText: DEFAULT_CLAUDE_CODE_SYSTEM_TEXT,
   },
 };
 
@@ -136,6 +175,19 @@ function stringArrayFromObject(value: unknown, key: string, fallback: readonly s
   return strings.length > 0 ? strings : [...fallback];
 }
 
+function stringRecordFromObject(value: unknown, key: string, fallback: Readonly<Record<string, string>>): Record<string, string> {
+  if (!isRecord(value)) return { ...fallback };
+  const item = value[key];
+  if (!isRecord(item)) return { ...fallback };
+
+  const strings = Object.fromEntries(
+    Object.entries(item).filter((entry): entry is [string, string] => (
+      typeof entry[0] === "string" && entry[0].trim().length > 0 && typeof entry[1] === "string"
+    )),
+  );
+  return { ...fallback, ...strings };
+}
+
 function parseFastConfig(footerFixed: unknown): FastModeConfig {
   const fast = isRecord(footerFixed) ? footerFixed.fast : undefined;
 
@@ -146,6 +198,26 @@ function parseFastConfig(footerFixed: unknown): FastModeConfig {
     persistState: boolFromObject(fast, "persistState") ?? DEFAULT_CONFIG.fast.persistState,
     serviceTier: stringFromObject(fast, "serviceTier", DEFAULT_CONFIG.fast.serviceTier),
     supportedModels: stringArrayFromObject(fast, "supportedModels", DEFAULT_CONFIG.fast.supportedModels),
+  };
+}
+
+function parseClaudeCodeCompatConfig(footerFixed: unknown): ClaudeCodeCompatConfig {
+  const claudeCodeCompat = isRecord(footerFixed) ? footerFixed.claudeCodeCompat : undefined;
+  const configured = isRecord(claudeCodeCompat);
+
+  return {
+    enabled: configured ? (boolFromObject(claudeCodeCompat, "enabled") ?? true) : DEFAULT_CONFIG.claudeCodeCompat.enabled,
+    providers: stringArrayFromObject(claudeCodeCompat, "providers", DEFAULT_CONFIG.claudeCodeCompat.providers),
+    supportedModels: stringArrayFromObject(
+      claudeCodeCompat,
+      "supportedModels",
+      DEFAULT_CONFIG.claudeCodeCompat.supportedModels,
+    ),
+    headers: stringRecordFromObject(claudeCodeCompat, "headers", DEFAULT_CONFIG.claudeCodeCompat.headers),
+    metadataUserId: stringFromObject(claudeCodeCompat, "metadataUserId", DEFAULT_CONFIG.claudeCodeCompat.metadataUserId),
+    systemIdentity: boolFromObject(claudeCodeCompat, "systemIdentity")
+      ?? DEFAULT_CONFIG.claudeCodeCompat.systemIdentity,
+    systemText: stringFromObject(claudeCodeCompat, "systemText", DEFAULT_CONFIG.claudeCodeCompat.systemText),
   };
 }
 
@@ -167,6 +239,7 @@ export function parseFooterFixedConfig(settings: Record<string, unknown>): Foote
     editorChrome: boolFromObject(footerFixed, "editorChrome")
       ?? DEFAULT_CONFIG.editorChrome,
     fast: parseFastConfig(footerFixed),
+    claudeCodeCompat: parseClaudeCodeCompatConfig(footerFixed),
   };
 }
 
