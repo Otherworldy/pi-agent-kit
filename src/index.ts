@@ -113,6 +113,24 @@ export default function footerFixedPlugin(pi: ExtensionAPI) {
       return;
     }
 
+    if (key === "providerCompat") {
+      if (config.providerCompat.enabled === value) return;
+      config.providerCompat.enabled = value;
+      config.claudeCodeCompat.enabled = value;
+      config.codexCompat.enabled = value;
+      const { claudeProviders, codexProviders } = registerProviderCompatProviders(
+        pi,
+        ctx,
+        state.currentModelRef,
+        config,
+        state.previousCompatProviderConfigs,
+      );
+      state.registeredClaudeCodeCompatProviders = claudeProviders;
+      state.registeredCodexCompatProviders = codexProviders;
+      updateProviderStatuses(ctx, state.currentModelRef, state.fastDesired, config);
+      return;
+    }
+
     if (config[key] === value) return;
 
     config[key] = value;
@@ -151,7 +169,11 @@ export default function footerFixedPlugin(pi: ExtensionAPI) {
    * 重新加载运行时配置
    */
   function reloadRuntimeConfig(ctx: any): void {
+    const providerCompatDesired = config.providerCompat.enabled;
     config = parseFooterFixedConfig(readSettings(ctx.cwd));
+    config.providerCompat.enabled = providerCompatDesired;
+    config.claudeCodeCompat.enabled = providerCompatDesired;
+    config.codexCompat.enabled = providerCompatDesired;
     state.fastDesired = config.fast.enabled || pi.getFlag?.("fast") === true;
     config.fast.enabled = state.fastDesired;
     const { claudeProviders, codexProviders } = registerProviderCompatProviders(
@@ -177,7 +199,7 @@ export default function footerFixedPlugin(pi: ExtensionAPI) {
     }
     if (action === "reload") {
       reloadRuntimeConfig(ctx);
-      notify(ctx, "Fast mode settings reloaded", "info");
+      notify(ctx, "Fast mode and provider compatibility settings reloaded", "info");
       return;
     }
     if (action === "status") {
@@ -187,13 +209,14 @@ export default function footerFixedPlugin(pi: ExtensionAPI) {
         config.fast.supportedModels,
         config.fast.serviceTier,
       );
-      const claudeCompatStatus = config.claudeCodeCompat.enabled
-        ? `Claude Code compat is on for providers: ${getRegisteredClaudeCodeCompatProviders(state.registeredClaudeCodeCompatProviders).join(", ") || "active model only"}.`
-        : "Claude Code compat is off.";
-      const codexCompatStatus = config.codexCompat.enabled
-        ? `Codex compat is on for providers: ${getRegisteredCodexCompatProviders(state.registeredCodexCompatProviders).join(", ") || "active model only"}.`
-        : "Codex compat is off.";
-      notify(ctx, `${fastStatus}\n${claudeCompatStatus}\n${codexCompatStatus}`, "info");
+      const claudeProviders = getRegisteredClaudeCodeCompatProviders(state.registeredClaudeCodeCompatProviders);
+      const codexProviders = getRegisteredCodexCompatProviders(state.registeredCodexCompatProviders);
+      const compatProviders = [...claudeProviders, ...codexProviders].sort();
+      const compatMode = claudeProviders.length > 0 ? "Claude Code" : codexProviders.length > 0 ? "Codex" : "no compatible active model";
+      const compatStatus = config.providerCompat.enabled
+        ? `Provider compat is on (${compatMode}) for providers: ${compatProviders.join(", ") || "active model only"}.`
+        : "Provider compat is off.";
+      notify(ctx, `${fastStatus}\n${compatStatus}`, "info");
       return;
     }
 

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { parseFooterFixedConfig } from "../src/config.ts";
+import { nextFooterFixedSetting, parseFooterFixedConfig } from "../src/config.ts";
 import { isSubagentProcess, shouldNotifyTaskCompletion, supportsWindowsToast } from "../src/notify.ts";
 
 test("task completion notifications are main interactive Windows or WSL agent only", () => {
@@ -24,12 +24,27 @@ test("task completion notifications, editor chrome, and fast defaults are config
   assert.equal(parseFooterFixedConfig({ footerFixed: { editorChrome: false } }).editorChrome, false);
   assert.equal(parseFooterFixedConfig({}).fast.enabled, false);
   assert.equal(parseFooterFixedConfig({ footerFixed: { fast: { enabled: true, supportedModels: ["my-openai/gpt-5.5"] } } }).fast.supportedModels[0], "my-openai/gpt-5.5");
+  assert.equal(parseFooterFixedConfig({}).providerCompat.enabled, false);
   assert.equal(parseFooterFixedConfig({}).claudeCodeCompat.enabled, false);
-  assert.equal(parseFooterFixedConfig({ footerFixed: { claudeCodeCompat: { providers: ["my-claude"] } } }).claudeCodeCompat.enabled, true);
-  assert.equal(parseFooterFixedConfig({ footerFixed: { claudeCodeCompat: { enabled: false, providers: ["my-claude"] } } }).claudeCodeCompat.enabled, false);
   assert.equal(parseFooterFixedConfig({}).codexCompat.enabled, false);
-  assert.equal(parseFooterFixedConfig({ footerFixed: { codexCompat: { providers: ["my-codex"] } } }).codexCompat.enabled, true);
-  assert.equal(parseFooterFixedConfig({ footerFixed: { codexCompat: { enabled: false, providers: ["my-codex"] } } }).codexCompat.enabled, false);
+  const providerCompatConfig = parseFooterFixedConfig({
+    footerFixed: {
+      providerCompat: {
+        enabled: true,
+        claudeCodeHeaders: { "User-Agent": "claude-cli/test" },
+        codexHeaders: { "X-Codex-Beta-Features": "remote_compaction_v2" },
+      },
+    },
+  });
+  assert.equal(providerCompatConfig.providerCompat.enabled, false);
+  assert.equal(providerCompatConfig.claudeCodeCompat.enabled, false);
+  assert.equal(providerCompatConfig.codexCompat.enabled, false);
+  assert.equal(providerCompatConfig.claudeCodeCompat.headers["User-Agent"], "claude-cli/test");
+  assert.equal(providerCompatConfig.claudeCodeCompat.headers["Anthropic-Version"], "2023-06-01");
+  assert.equal(providerCompatConfig.codexCompat.headers["X-Codex-Beta-Features"], "remote_compaction_v2");
+  assert.equal(providerCompatConfig.codexCompat.headers.Originator, "codex_cli_rs");
+  assert.equal(parseFooterFixedConfig({ footerFixed: { providerCompat: { enabled: false } } }).claudeCodeCompat.enabled, false);
+  assert.deepEqual(nextFooterFixedSetting(undefined, { editorChrome: false }), { editorChrome: false });
 });
 
 test("subagent processes are detected from pi-subagents environment", () => {

@@ -13,10 +13,10 @@ import {
   supportsCodexCompat,
 } from "../src/provider-compat.ts";
 
-const baseConfig: ProviderCompatConfig = {
+const claudeConfig: ProviderCompatConfig = {
   enabled: true,
-  providers: ["my-claude"],
-  supportedModels: ["my-claude/claude-sonnet", "other/*"],
+  providers: [],
+  supportedModels: [],
   headers: { "User-Agent": "claude-cli/test", "X-App": "cli" },
   metadataUserId: "pi-agent",
   systemIdentity: true,
@@ -25,8 +25,8 @@ const baseConfig: ProviderCompatConfig = {
 
 const codexConfig: CodexCompatConfig = {
   enabled: true,
-  providers: ["my-codex"],
-  supportedModels: ["my-codex/gpt-5.5"],
+  providers: [],
+  supportedModels: [],
   headers: {
     Originator: "codex_cli_rs",
     "User-Agent": "codex_cli_rs/test",
@@ -41,7 +41,7 @@ const codexConfig: CodexCompatConfig = {
   store: false,
 };
 
-test("Claude Code compat model selectors support exact, provider wildcard, model-only, and global wildcard", () => {
+test("provider compat model selectors still support exact, provider wildcard, model-only, and global wildcard", () => {
   const model = { provider: "my-claude", id: "claude-sonnet" };
 
   assert.equal(matchesCompatModelSelector(model, "my-claude/claude-sonnet"), true);
@@ -53,35 +53,23 @@ test("Claude Code compat model selectors support exact, provider wildcard, model
   assert.equal(matchesCompatModelSelector(model, "my-claude/other"), false);
 });
 
-test("Claude Code compat support uses config activation and allow list", () => {
-  assert.equal(supportsClaudeCodeCompat({ provider: "my-claude", id: "claude-sonnet" }, baseConfig), true);
-  assert.equal(supportsClaudeCodeCompat({ provider: "other", id: "any" }, baseConfig), true);
-  assert.equal(supportsClaudeCodeCompat({ provider: "my-claude", id: "haiku" }, baseConfig), false);
-  assert.equal(supportsClaudeCodeCompat({ provider: "my-claude", id: "claude-sonnet" }, {
-    ...baseConfig,
-    enabled: false,
-  }), false);
-  assert.equal(supportsClaudeCodeCompat({ provider: "unlisted", id: "model" }, {
-    ...baseConfig,
-    supportedModels: [],
-  }), false);
-  assert.equal(supportsClaudeCodeCompat({ provider: "unlisted", id: "model" }, {
-    ...baseConfig,
-    providers: [],
-    supportedModels: [],
-  }), true);
+test("provider compat auto-detects Claude Code and Codex model families", () => {
+  assert.equal(supportsClaudeCodeCompat({ provider: "my-claude", id: "sonnet", api: "openai-responses" }, claudeConfig), true);
+  assert.equal(supportsClaudeCodeCompat({ provider: "anthropic", id: "sonnet", api: "anthropic-messages" }, claudeConfig), true);
+  assert.equal(supportsClaudeCodeCompat({ provider: "my-codex", id: "gpt-5.5", api: "openai-responses" }, claudeConfig), false);
+  assert.equal(supportsClaudeCodeCompat({ provider: "my-claude", id: "sonnet" }, { ...claudeConfig, enabled: false }), false);
+
+  assert.equal(supportsCodexCompat({ provider: "my-codex", id: "gpt-5.5", api: "openai-responses" }, codexConfig), true);
+  assert.equal(supportsCodexCompat({ provider: "openai-codex", id: "gpt-5.5", api: "openai-codex-responses" }, codexConfig), true);
+  assert.equal(supportsCodexCompat({ provider: "my-claude", id: "claude-sonnet", api: "openai-responses" }, codexConfig), false);
+  assert.equal(supportsCodexCompat({ provider: "my-codex", id: "gpt-5.5", api: "openai-responses" }, { ...codexConfig, enabled: false }), false);
 });
 
-test("Claude Code compat provider registration list combines explicit providers and model selectors", () => {
-  assert.deepEqual(getClaudeCodeCompatProviderNames(baseConfig, { provider: "active", id: "model" }).sort(), [
-    "my-claude",
-    "other",
-  ]);
-
-  assert.deepEqual(getClaudeCodeCompatProviderNames({
-    ...baseConfig,
-    supportedModels: ["*"],
-  }, { provider: "active", id: "model" }).sort(), ["active", "my-claude"]);
+test("provider compat registers only the active provider for the detected family", () => {
+  assert.deepEqual(getClaudeCodeCompatProviderNames(claudeConfig, { provider: "my-claude", id: "claude-sonnet" }), ["my-claude"]);
+  assert.deepEqual(getClaudeCodeCompatProviderNames(claudeConfig, { provider: "my-codex", id: "gpt-5.5", api: "openai-responses" }), []);
+  assert.deepEqual(getCodexCompatProviderNames(codexConfig, { provider: "my-codex", id: "gpt-5.5", api: "openai-responses" }), ["my-codex"]);
+  assert.deepEqual(getCodexCompatProviderNames(codexConfig, { provider: "my-claude", id: "claude-sonnet" }), []);
 });
 
 test("Claude Code compat patches native Anthropic payloads without mutating originals", () => {
@@ -92,7 +80,7 @@ test("Claude Code compat patches native Anthropic payloads without mutating orig
   };
 
   const patched = patchClaudeCodeCompatPayload(payload, {
-    config: baseConfig,
+    config: claudeConfig,
     model: { provider: "my-claude", id: "claude-sonnet" },
   });
 
@@ -117,7 +105,7 @@ test("Claude Code compat patches OpenAI chat and responses payload shapes", () =
     model: "claude-sonnet",
     messages: [{ role: "user", content: "hi" }],
   }, {
-    config: baseConfig,
+    config: claudeConfig,
     model: { provider: "my-claude", id: "claude-sonnet" },
   }), {
     model: "claude-sonnet",
@@ -132,7 +120,7 @@ test("Claude Code compat patches OpenAI chat and responses payload shapes", () =
     model: "claude-sonnet",
     input: [{ role: "user", content: "hi" }],
   }, {
-    config: baseConfig,
+    config: claudeConfig,
     model: { provider: "my-claude", id: "claude-sonnet" },
   }), {
     model: "claude-sonnet",
@@ -145,25 +133,18 @@ test("Claude Code compat patches OpenAI chat and responses payload shapes", () =
 });
 
 test("Claude Code compat returns undefined when nothing changes or model is unsupported", () => {
-  assert.equal(patchClaudeCodeCompatPayload({ model: "haiku" }, {
-    config: baseConfig,
-    model: { provider: "my-claude", id: "haiku" },
+  assert.equal(patchClaudeCodeCompatPayload({ model: "gpt-5.5" }, {
+    config: claudeConfig,
+    model: { provider: "my-codex", id: "gpt-5.5", api: "openai-responses" },
   }), undefined);
 
   assert.equal(patchClaudeCodeCompatPayload({
     metadata: { user_id: "pi-agent" },
     system: [{ type: "text", text: "You are Claude Code, Anthropic's official CLI for Claude." }],
   }, {
-    config: baseConfig,
+    config: claudeConfig,
     model: { provider: "my-claude", id: "claude-sonnet" },
   }), undefined);
-});
-
-test("Codex compat support and provider registration follow provider/model selectors", () => {
-  assert.equal(supportsCodexCompat({ provider: "my-codex", id: "gpt-5.5" }, codexConfig), true);
-  assert.equal(supportsCodexCompat({ provider: "my-codex", id: "gpt-5.4" }, codexConfig), false);
-  assert.deepEqual(getCodexCompatProviderNames(codexConfig, { provider: "active", id: "model" }), ["my-codex"]);
-  assert.deepEqual(getCodexCompatProviderNames({ ...codexConfig, supportedModels: ["*"] }, { provider: "active", id: "model" }).sort(), ["active", "my-codex"]);
 });
 
 test("Codex compat builds Codex CLI-like headers with turn metadata", () => {
@@ -234,6 +215,6 @@ test("Codex compat can prepend optional instructions and skips non-responses pay
     messages: [{ role: "user", content: "hi" }],
   }, {
     config: codexConfig,
-    model: { provider: "my-codex", id: "gpt-5.5", api: "openai-completions" },
+    model: { provider: "other", id: "custom-model", api: "openai-completions" },
   }), undefined);
 });

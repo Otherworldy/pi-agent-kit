@@ -24,6 +24,12 @@ export interface CodexCompatConfig extends ProviderCompatConfig {
   store: boolean;
 }
 
+export interface ProviderCompatSwitchConfig {
+  enabled: boolean;
+  claudeCodeHeaders: Record<string, string>;
+  codexHeaders: Record<string, string>;
+}
+
 export interface FooterFixedConfig {
   fixedEditor: boolean;
   mouseScroll: boolean;
@@ -31,6 +37,7 @@ export interface FooterFixedConfig {
   taskCompletionNotification: boolean;
   editorChrome: boolean;
   fast: FastModeConfig;
+  providerCompat: ProviderCompatSwitchConfig;
   claudeCodeCompat: ProviderCompatConfig;
   codexCompat: CodexCompatConfig;
 }
@@ -41,10 +48,12 @@ export type FooterFixedBooleanSettingKey =
   | "showExtensionStatus"
   | "taskCompletionNotification"
   | "editorChrome"
+  | "providerCompat"
   | "fast.enabled";
 
-export type FooterFixedConfigUpdates = Partial<Omit<FooterFixedConfig, "fast" | "claudeCodeCompat" | "codexCompat">> & {
+export type FooterFixedConfigUpdates = Partial<Omit<FooterFixedConfig, "fast" | "providerCompat" | "claudeCodeCompat" | "codexCompat">> & {
   fast?: Partial<FastModeConfig>;
+  providerCompat?: Partial<ProviderCompatSwitchConfig>;
   claudeCodeCompat?: Partial<ProviderCompatConfig>;
   codexCompat?: Partial<CodexCompatConfig>;
 };
@@ -95,6 +104,11 @@ const DEFAULT_CONFIG: FooterFixedConfig = {
     persistState: true,
     serviceTier: "priority",
     supportedModels: [...DEFAULT_FAST_SUPPORTED_MODELS],
+  },
+  providerCompat: {
+    enabled: false,
+    claudeCodeHeaders: { ...DEFAULT_CLAUDE_CODE_COMPAT_HEADERS },
+    codexHeaders: { ...DEFAULT_CODEX_COMPAT_HEADERS },
   },
   claudeCodeCompat: {
     enabled: false,
@@ -216,6 +230,17 @@ function stringRecordFromObject(value: unknown, key: string, fallback: Readonly<
   return { ...fallback, ...strings };
 }
 
+function nestedHeaderRecordFromObject(
+  value: unknown,
+  directKey: string,
+  nestedKey: string,
+  fallback: Readonly<Record<string, string>>,
+): Record<string, string> {
+  const directHeaders = stringRecordFromObject(value, directKey, fallback);
+  const nestedConfig = isRecord(value) ? value[nestedKey] : undefined;
+  return stringRecordFromObject(nestedConfig, "headers", directHeaders);
+}
+
 function parseFastConfig(footerFixed: unknown): FastModeConfig {
   const fast = isRecord(footerFixed) ? footerFixed.fast : undefined;
 
@@ -229,27 +254,52 @@ function parseFastConfig(footerFixed: unknown): FastModeConfig {
   };
 }
 
+function parseProviderCompatSwitchConfig(footerFixed: unknown): ProviderCompatSwitchConfig {
+  const providerCompat = isRecord(footerFixed) ? footerFixed.providerCompat : undefined;
+
+  return {
+    enabled: DEFAULT_CONFIG.providerCompat.enabled,
+    claudeCodeHeaders: nestedHeaderRecordFromObject(
+      providerCompat,
+      "claudeCodeHeaders",
+      "claudeCode",
+      DEFAULT_CONFIG.providerCompat.claudeCodeHeaders,
+    ),
+    codexHeaders: nestedHeaderRecordFromObject(
+      providerCompat,
+      "codexHeaders",
+      "codex",
+      DEFAULT_CONFIG.providerCompat.codexHeaders,
+    ),
+  };
+}
+
 function parseProviderCompatConfig(
   footerFixed: unknown,
   key: "claudeCodeCompat" | "codexCompat",
+  enabled: boolean,
+  headers: Record<string, string>,
 ): ProviderCompatConfig {
   const rawConfig = isRecord(footerFixed) ? footerFixed[key] : undefined;
-  const configured = isRecord(rawConfig);
   const defaults = DEFAULT_CONFIG[key];
 
   return {
-    enabled: configured ? (boolFromObject(rawConfig, "enabled") ?? true) : defaults.enabled,
-    providers: stringArrayFromObject(rawConfig, "providers", defaults.providers),
-    supportedModels: stringArrayFromObject(rawConfig, "supportedModels", defaults.supportedModels),
-    headers: stringRecordFromObject(rawConfig, "headers", defaults.headers),
+    enabled,
+    providers: [...defaults.providers],
+    supportedModels: [...defaults.supportedModels],
+    headers: stringRecordFromObject(rawConfig, "headers", headers),
     metadataUserId: stringFromObject(rawConfig, "metadataUserId", defaults.metadataUserId),
     systemIdentity: boolFromObject(rawConfig, "systemIdentity") ?? defaults.systemIdentity,
     systemText: stringFromObject(rawConfig, "systemText", defaults.systemText),
   };
 }
 
-function parseCodexCompatConfig(footerFixed: unknown): CodexCompatConfig {
-  const base = parseProviderCompatConfig(footerFixed, "codexCompat");
+function parseCodexCompatConfig(
+  footerFixed: unknown,
+  enabled: boolean,
+  headers: Record<string, string>,
+): CodexCompatConfig {
+  const base = parseProviderCompatConfig(footerFixed, "codexCompat", enabled, headers);
   const rawConfig = isRecord(footerFixed) ? footerFixed.codexCompat : undefined;
 
   return {
@@ -262,6 +312,7 @@ function parseCodexCompatConfig(footerFixed: unknown): CodexCompatConfig {
 export function parseFooterFixedConfig(settings: Record<string, unknown>): FooterFixedConfig {
   const footerFixed = settings.footerFixed;
   const powerline = settings.powerline;
+  const providerCompat = parseProviderCompatSwitchConfig(footerFixed);
 
   return {
     fixedEditor: boolFromObject(footerFixed, "fixedEditor")
@@ -277,8 +328,18 @@ export function parseFooterFixedConfig(settings: Record<string, unknown>): Foote
     editorChrome: boolFromObject(footerFixed, "editorChrome")
       ?? DEFAULT_CONFIG.editorChrome,
     fast: parseFastConfig(footerFixed),
-    claudeCodeCompat: parseProviderCompatConfig(footerFixed, "claudeCodeCompat"),
-    codexCompat: parseCodexCompatConfig(footerFixed),
+    providerCompat,
+    claudeCodeCompat: parseProviderCompatConfig(
+      footerFixed,
+      "claudeCodeCompat",
+      providerCompat.enabled,
+      providerCompat.claudeCodeHeaders,
+    ),
+    codexCompat: parseCodexCompatConfig(
+      footerFixed,
+      providerCompat.enabled,
+      providerCompat.codexHeaders,
+    ),
   };
 }
 
@@ -286,7 +347,7 @@ export function nextFooterFixedSetting(
   existingFooterFixedSetting: unknown,
   updates: FooterFixedConfigUpdates,
 ): unknown {
-  const existing = isRecord(existingFooterFixedSetting) ? existingFooterFixedSetting : DEFAULT_CONFIG;
+  const existing = isRecord(existingFooterFixedSetting) ? existingFooterFixedSetting : {};
   return mergeSettings(existing as Record<string, unknown>, updates as Record<string, unknown>);
 }
 

@@ -25,6 +25,27 @@ export function getCompatModelKey(model: ProviderCompatModelLike | null | undefi
   return model.provider ? `${model.provider}/${model.id}` : model.id;
 }
 
+function normalizedModelText(model: ProviderCompatModelLike | null | undefined): string {
+  return [model?.provider, model?.id, model?.api]
+    .filter((value): value is string => typeof value === "string")
+    .join("/")
+    .toLowerCase();
+}
+
+function isClaudeLikeModel(model: ProviderCompatModelLike | null | undefined): boolean {
+  const text = normalizedModelText(model);
+  return model?.api === "anthropic-messages" || text.includes("claude") || text.includes("anthropic");
+}
+
+function isCodexLikeModel(model: ProviderCompatModelLike | null | undefined): boolean {
+  if (isClaudeLikeModel(model)) return false;
+  if (model?.api === "openai-codex-responses") return true;
+  const text = normalizedModelText(model);
+  if (text.includes("codex")) return true;
+  if (model?.api === "openai-responses") return true;
+  return /(^|\/)gpt[-_]/.test(text) || /(^|\/)o[1-9]($|[-_])/.test(text);
+}
+
 export function matchesCompatModelSelector(
   model: ProviderCompatModelLike | null | undefined,
   selector: string,
@@ -65,19 +86,20 @@ export function supportsClaudeCodeCompat(
   model: ProviderCompatModelLike | null | undefined,
   config: ProviderCompatConfig,
 ): boolean {
-  return supportsProviderCompat(model, config);
+  return supportsProviderCompat(model, config) && isClaudeLikeModel(model);
 }
 
 export function supportsCodexCompat(
   model: ProviderCompatModelLike | null | undefined,
   config: CodexCompatConfig,
 ): boolean {
-  return supportsProviderCompat(model, config);
+  return supportsProviderCompat(model, config) && isCodexLikeModel(model);
 }
 
-export function getProviderCompatProviderNames(
-  config: ProviderCompatConfig,
+export function getProviderCompatProviderNames<TConfig extends ProviderCompatConfig>(
+  config: TConfig,
   model: ProviderCompatModelLike | null | undefined,
+  supportsCompat: (model: ProviderCompatModelLike | null | undefined, config: TConfig) => boolean = supportsProviderCompat,
 ): string[] {
   if (!config.enabled) return [];
 
@@ -96,7 +118,7 @@ export function getProviderCompatProviderNames(
     }
   }
 
-  if (supportsProviderCompat(model, config) && model?.provider) {
+  if (supportsCompat(model, config) && model?.provider) {
     providers.add(model.provider);
   }
 
@@ -107,14 +129,14 @@ export function getClaudeCodeCompatProviderNames(
   config: ProviderCompatConfig,
   model: ProviderCompatModelLike | null | undefined,
 ): string[] {
-  return getProviderCompatProviderNames(config, model);
+  return getProviderCompatProviderNames(config, model, supportsClaudeCodeCompat);
 }
 
 export function getCodexCompatProviderNames(
   config: CodexCompatConfig,
   model: ProviderCompatModelLike | null | undefined,
 ): string[] {
-  return getProviderCompatProviderNames(config, model);
+  return getProviderCompatProviderNames(config, model, supportsCodexCompat);
 }
 
 function textContentIncludes(value: unknown, needle: string): boolean {

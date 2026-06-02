@@ -54,9 +54,12 @@ export function updateClaudeCodeCompatStatus(
   }
 
   const active = supportsClaudeCodeCompat(activeModel(ctx, currentModelRef), config.claudeCodeCompat);
-  const label = active ? "CC compat" : "CC compat*";
-  const color = active ? "accent" : "warning";
-  ctx.ui.setStatus("footer-fixed-claude-code", ctx.ui.theme?.fg?.(color, label) ?? label);
+  if (!active) {
+    ctx.ui.setStatus("footer-fixed-claude-code", undefined);
+    return;
+  }
+
+  ctx.ui.setStatus("footer-fixed-claude-code", ctx.ui.theme?.fg?.("accent", "CC compat") ?? "CC compat");
 }
 
 /**
@@ -75,9 +78,12 @@ export function updateCodexCompatStatus(
   }
 
   const active = supportsCodexCompat(activeModel(ctx, currentModelRef), config.codexCompat);
-  const label = active ? "Codex compat" : "Codex compat*";
-  const color = active ? "accent" : "warning";
-  ctx.ui.setStatus("footer-fixed-codex", ctx.ui.theme?.fg?.(color, label) ?? label);
+  if (!active) {
+    ctx.ui.setStatus("footer-fixed-codex", undefined);
+    return;
+  }
+
+  ctx.ui.setStatus("footer-fixed-codex", ctx.ui.theme?.fg?.("accent", "Codex compat") ?? "Codex compat");
 }
 
 /**

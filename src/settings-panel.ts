@@ -85,6 +85,13 @@ export class FooterFixedSettingsPanel extends Container {
         values: ["true", "false"],
       },
       {
+        id: "providerCompat",
+        label: "Provider compatibility",
+        description: "Apply Claude Code or Codex CLI request compatibility to the active model.",
+        currentValue: options.config.providerCompat.enabled ? "true" : "false",
+        values: ["true", "false"],
+      },
+      {
         id: "fast.enabled",
         label: "Fast mode",
         description: "Request OpenAI priority service tier for allow-listed custom provider models.",
@@ -131,7 +138,7 @@ export function showFooterFixedSettingsPanel(
     overlayOptions: {
       anchor: "center",
       width: 64,
-      maxHeight: 18,
+      maxHeight: 20,
     },
   });
 }

@@ -7,6 +7,9 @@ import { join } from "node:path";
 import { initTheme } from "@earendil-works/pi-coding-agent";
 import footerFixedPlugin from "../src/index.ts";
 
+// 增加EventEmitter监听器限制，避免测试中的警告
+process.setMaxListeners(20);
+
 initTheme("dark");
 
 class FakeTerminal {
@@ -55,30 +58,18 @@ function createTempSettings() {
         serviceTier: "priority",
         supportedModels: ["my-openai/gpt-5.5"],
       },
-      claudeCodeCompat: {
-        providers: ["my-openai"],
-        supportedModels: ["my-openai/gpt-5.5"],
-        headers: {
+      providerCompat: {
+        claudeCodeHeaders: {
           "User-Agent": "claude-cli/test",
           "X-App": "cli",
         },
-        metadataUserId: "pi-agent",
-        systemIdentity: true,
-        systemText: "You are Claude Code, Anthropic's official CLI for Claude.",
-      },
-      codexCompat: {
-        providers: ["my-codex"],
-        supportedModels: ["my-codex/gpt-5.5"],
-        headers: {
+        codexHeaders: {
           Originator: "codex_cli_rs",
           "User-Agent": "codex_cli_rs/test",
           "OpenAI-Beta": "responses=experimental",
           "X-Codex-Beta-Features": "remote_compaction_v2",
           "X-Codex-Turn-Metadata": "",
         },
-        metadataUserId: "pi-agent",
-        promptCacheKey: "pi-agent",
-        store: false,
       },
     },
   }), "utf-8");
@@ -530,7 +521,7 @@ test("fast command toggles status, editor chrome label, and provider payload", a
   await withTempSettings(async ({ cwd }) => {
     const settingsPath = join(cwd, ".pi", "settings.json");
     const settingsBefore = JSON.parse(readFileSync(settingsPath, "utf-8"));
-    delete settingsBefore.footerFixed.claudeCodeCompat;
+    delete settingsBefore.footerFixed.providerCompat;
     writeFileSync(settingsPath, JSON.stringify(settingsBefore), "utf-8");
 
     const harness = createHarness(cwd, { synchronousEditorComponent: true, synchronousFooter: true });
@@ -552,13 +543,21 @@ test("fast command toggles status, editor chrome label, and provider payload", a
   });
 });
 
-test("Claude Code compat config registers provider headers and patches provider payload by default", async () => {
+test("provider compat switch auto-registers Claude Code headers and patches Claude payloads", async () => {
   await withTempSettings(async ({ cwd }) => {
     const harness = createHarness(cwd, { synchronousEditorComponent: true, synchronousFooter: true });
+    harness.ctx.model = { contextWindow: 200000, id: "claude-sonnet-4-5", provider: "my-claude", api: "openai-responses" };
     assert.ok(harness.sessionStart);
     await harness.sessionStart({ reason: "new" }, harness.ctx);
 
-    const providerConfig = harness.providerRegistrations.get("my-openai") as { headers: Record<string, string> };
+    const { promise, state } = await harness.openSettings();
+    state.panel.settingsList.onChange("providerCompat", "true");
+    state.done();
+    await promise;
+
+    const settings = JSON.parse(readFileSync(join(cwd, ".pi", "settings.json"), "utf-8"));
+    assert.equal(settings.footerFixed.providerCompat.enabled, undefined);
+    const providerConfig = harness.providerRegistrations.get("my-claude") as { headers: Record<string, string> };
     assert.equal(providerConfig.headers["User-Agent"], "claude-cli/test");
     assert.equal(providerConfig.headers["X-App"], "cli");
     assert.equal(providerConfig.headers["Anthropic-Version"], "2023-06-01");
@@ -566,11 +565,11 @@ test("Claude Code compat config registers provider headers and patches provider 
     assert.equal(harness.statuses.get("footer-fixed-claude-code"), "CC compat");
     assert.deepEqual(await harness.emit("before_provider_request", {
       payload: {
-        model: "gpt-5.5",
+        model: "claude-sonnet-4-5",
         messages: [{ role: "user", content: "hi" }],
       },
     }), {
-      model: "gpt-5.5",
+      model: "claude-sonnet-4-5",
       messages: [
         { role: "system", content: "You are Claude Code, Anthropic's official CLI for Claude." },
         { role: "user", content: "hi" },
@@ -580,12 +579,17 @@ test("Claude Code compat config registers provider headers and patches provider 
   });
 });
 
-test("Codex compat config registers provider headers and patches responses payload by default", async () => {
+test("provider compat switch auto-registers Codex headers and patches responses payloads", async () => {
   await withTempSettings(async ({ cwd }) => {
     const harness = createHarness(cwd, { synchronousEditorComponent: true, synchronousFooter: true });
     harness.ctx.model = { contextWindow: 200000, id: "gpt-5.5", provider: "my-codex", api: "openai-codex-responses" };
     assert.ok(harness.sessionStart);
     await harness.sessionStart({ reason: "new" }, harness.ctx);
+
+    const { promise, state } = await harness.openSettings();
+    state.panel.settingsList.onChange("providerCompat", "true");
+    state.done();
+    await promise;
 
     const providerConfig = harness.providerRegistrations.get("my-codex") as { headers: Record<string, string> };
     assert.equal(providerConfig.headers.Originator, "codex_cli_rs");
