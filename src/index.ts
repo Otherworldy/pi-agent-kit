@@ -17,7 +17,7 @@ import {
   patchClaudeCodeCompatPayload,
   patchCodexCompatPayload,
 } from "./provider-compat.ts";
-import { notifyTaskCompleteWindows, shouldNotifyTaskCompletion } from "./notify.ts";
+import { getTaskCompletionNotificationStatus, notifyTaskCompleteWindows, shouldNotifyTaskCompletion } from "./notify.ts";
 import { showFooterFixedSettingsPanel } from "./settings-panel.ts";
 import { createPluginState, resetPluginState, cleanupPluginState } from "./plugin-state.ts";
 import type { PluginState } from "./plugin-state.ts";
@@ -315,9 +315,9 @@ export default function footerFixedPlugin(pi: ExtensionAPI) {
     }
   });
 
-  pi.on("agent_end", async (_event, ctx) => {
+  pi.on("agent_end", async (event, ctx) => {
     if (config.taskCompletionNotification && shouldNotifyTaskCompletion(ctx)) {
-      notifyTaskCompleteWindows();
+      notifyTaskCompleteWindows(getTaskCompletionNotificationStatus(event.messages));
     }
   });
 

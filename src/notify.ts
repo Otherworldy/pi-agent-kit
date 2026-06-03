@@ -1,8 +1,22 @@
 import { execFile } from "node:child_process";
 import { readFileSync } from "node:fs";
 
-const WINDOWS_TOAST_TITLE = "任务已完成";
-const WINDOWS_TOAST_BODY = "Pi Agent 已完成任务，正在等待你的输入。";
+export type TaskCompletionNotificationStatus = "completed" | "aborted" | "error";
+
+const WINDOWS_TOAST_MESSAGES: Record<TaskCompletionNotificationStatus, { title: string; body: string }> = {
+  completed: {
+    title: "任务已完成",
+    body: "Pi Agent 已完成任务，正在等待你的输入。",
+  },
+  aborted: {
+    title: "任务已中断",
+    body: "Pi Agent 任务已异常中断，正在等待你的输入。",
+  },
+  error: {
+    title: "任务出错",
+    body: "Pi Agent 任务遇到错误，正在等待你的输入。",
+  },
+};
 const WINDOWS_TOAST_APP_ID = "Pi Agent";
 
 const SUBAGENT_ENV_KEYS = [
@@ -13,6 +27,12 @@ const SUBAGENT_ENV_KEYS = [
 ] as const;
 
 type Env = NodeJS.ProcessEnv;
+
+type AssistantLikeMessage = {
+  role?: unknown;
+  stopReason?: unknown;
+  errorMessage?: unknown;
+};
 
 function getArgValue(argv: readonly string[], flag: string): string | undefined {
   const index = argv.indexOf(flag);
@@ -37,6 +57,26 @@ function windowsToastScript(title: string, body: string): string {
     `[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier(${powershellSingleQuoted(WINDOWS_TOAST_APP_ID)}).Show($toast)`,
     "} catch {}",
   ].join("\n");
+}
+
+function isAssistantMessage(message: unknown): message is AssistantLikeMessage {
+  return typeof message === "object" && message !== null && (message as AssistantLikeMessage).role === "assistant";
+}
+
+export function getTaskCompletionNotificationStatus(messages: readonly unknown[]): TaskCompletionNotificationStatus {
+  const lastAssistantMessage = [...messages].reverse().find(isAssistantMessage);
+  const stopReason = typeof lastAssistantMessage?.stopReason === "string" ? lastAssistantMessage.stopReason : undefined;
+
+  if (stopReason === "aborted") return "aborted";
+  if (stopReason === "error") return "error";
+  if (typeof lastAssistantMessage?.errorMessage === "string" && lastAssistantMessage.errorMessage.trim()) return "error";
+  if (stopReason && stopReason !== "stop" && stopReason !== "toolUse") return "error";
+
+  return "completed";
+}
+
+export function taskCompletionNotificationMessage(status: TaskCompletionNotificationStatus): { title: string; body: string } {
+  return WINDOWS_TOAST_MESSAGES[status];
 }
 
 export function isSubagentProcess(env: Env = process.env, argv: readonly string[] = process.argv): boolean {
@@ -77,8 +117,10 @@ export function shouldNotifyTaskCompletion(
   return supportsWindowsToast(platform, env) && ctx?.hasUI === true && !isSubagentProcess(env, argv);
 }
 
-export function notifyTaskCompleteWindows(title = WINDOWS_TOAST_TITLE, body = WINDOWS_TOAST_BODY): void {
+export function notifyTaskCompleteWindows(status: TaskCompletionNotificationStatus = "completed"): void {
   if (!supportsWindowsToast()) return;
+
+  const { title, body } = taskCompletionNotificationMessage(status);
 
   try {
     execFile(

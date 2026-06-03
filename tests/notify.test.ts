@@ -1,7 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { nextFooterFixedSetting, parseFooterFixedConfig } from "../src/config.ts";
-import { isSubagentProcess, shouldNotifyTaskCompletion, supportsWindowsToast } from "../src/notify.ts";
+import {
+  getTaskCompletionNotificationStatus,
+  isSubagentProcess,
+  shouldNotifyTaskCompletion,
+  supportsWindowsToast,
+  taskCompletionNotificationMessage,
+} from "../src/notify.ts";
 
 test("task completion notifications are main interactive Windows or WSL agent only", () => {
   assert.equal(shouldNotifyTaskCompletion({ hasUI: true }, {}, ["node", "pi"], "win32"), true);
@@ -45,6 +51,29 @@ test("task completion notifications, editor chrome, and fast defaults are config
   assert.equal(providerCompatConfig.codexCompat.headers.Originator, "codex_cli_rs");
   assert.equal(parseFooterFixedConfig({ footerFixed: { providerCompat: { enabled: false } } }).claudeCodeCompat.enabled, true);
   assert.deepEqual(nextFooterFixedSetting(undefined, { editorChrome: false }), { editorChrome: false });
+});
+
+test("task completion notification status is derived from the final assistant result", () => {
+  assert.equal(getTaskCompletionNotificationStatus([{ role: "assistant", stopReason: "stop" }]), "completed");
+  assert.equal(getTaskCompletionNotificationStatus([{ role: "assistant", stopReason: "toolUse" }]), "completed");
+  assert.equal(getTaskCompletionNotificationStatus([{ role: "assistant", stopReason: "aborted" }]), "aborted");
+  assert.equal(getTaskCompletionNotificationStatus([{ role: "assistant", stopReason: "error" }]), "error");
+  assert.equal(getTaskCompletionNotificationStatus([{ role: "assistant", stopReason: "length" }]), "error");
+  assert.equal(getTaskCompletionNotificationStatus([{ role: "assistant", stopReason: "stop", errorMessage: "boom" }]), "error");
+  assert.equal(
+    getTaskCompletionNotificationStatus([
+      { role: "assistant", stopReason: "error" },
+      { role: "toolResult", isError: true },
+      { role: "assistant", stopReason: "stop" },
+    ]),
+    "completed",
+  );
+});
+
+test("task completion notification messages distinguish completion, interruption, and errors", () => {
+  assert.equal(taskCompletionNotificationMessage("completed").title, "任务已完成");
+  assert.equal(taskCompletionNotificationMessage("aborted").title, "任务已中断");
+  assert.equal(taskCompletionNotificationMessage("error").title, "任务出错");
 });
 
 test("subagent processes are detected from pi-subagents environment", () => {
