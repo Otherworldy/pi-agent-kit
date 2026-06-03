@@ -20,6 +20,18 @@ export function getFastChromeLabel(
 /**
  * 更新快速模式状态
  */
+export function getProviderCompatChromeLabel(
+  ctx: any | undefined,
+  currentModelRef: any,
+  config: FooterFixedConfig,
+): string | undefined {
+  if (!config.providerCompat.enabled) return undefined;
+  const model = activeModel(ctx, currentModelRef);
+  if (supportsClaudeCodeCompat(model, config.claudeCodeCompat)) return "CC";
+  if (supportsCodexCompat(model, config.codexCompat)) return "Codex";
+  return undefined;
+}
+
 export function updateFastStatus(
   ctx: any,
   currentModelRef: any,

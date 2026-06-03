@@ -25,6 +25,7 @@ export interface EditorChromeRenderInput {
   enabled: boolean;
   context: EditorChromeContextLike | null | undefined;
   thinkingLevel: string;
+  providerCompatLabel?: string;
   fastLabel?: string;
   borderColor?: (text: string) => string;
   renderBase: (width: number) => string[];
@@ -238,6 +239,7 @@ function buildTopLabels(
   context: EditorChromeContextLike,
   thinkingLevel: string,
   width: number,
+  providerCompatLabel?: string,
   fastLabel?: string,
 ): { left: string; right: string } {
   const theme = context.ui?.theme;
@@ -249,10 +251,11 @@ function buildTopLabels(
   const gitWidth = Math.min(visibleWidth(git), maxRight);
   const thinkingText = thinkingLevel || "off";
   const thinking = fg(theme, thinkingColor(thinkingText), thinkingText);
+  const providerCompat = providerCompatLabel ? fg(theme, providerCompatLabel.includes("*") ? "warning" : "accent", providerCompatLabel) : "";
   const fast = fastLabel ? fg(theme, fastLabel.includes("*") ? "warning" : "accent", fastLabel) : "";
   const contextUsage = formatContextUsage(context, theme);
   const separator = fg(theme, "dim", " · ");
-  const fixedParts = [thinking, fast, contextUsage].filter(Boolean);
+  const fixedParts = [thinking, providerCompat, fast, contextUsage].filter(Boolean);
   const fixedWidth = fixedParts.reduce((total, part) => total + visibleWidth(part), 0);
   const separatorWidth = visibleWidth(separator) * fixedParts.length;
   const modelMaxWidth = Math.max(1, innerWidth - gitWidth - fixedWidth - separatorWidth - 3);
@@ -288,7 +291,7 @@ export function renderEditorChrome(input: EditorChromeRenderInput): string[] {
   if (!split) return input.renderBase(input.width);
 
   const borderColor = input.borderColor ?? ((text: string) => text);
-  const top = buildTopLabels(input.context, input.thinkingLevel, width, input.fastLabel);
+  const top = buildTopLabels(input.context, input.thinkingLevel, width, input.providerCompatLabel, input.fastLabel);
   const bottom = buildBottomLabels(input.context);
   const bodyPadding = " ".repeat(paddingX);
   const popupPadding = " ".repeat(paddingX + 1);

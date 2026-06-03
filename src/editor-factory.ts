@@ -3,7 +3,7 @@ import type { PluginState, EditorFactory, FooterFixedEditorFactory } from "./plu
 import type { FooterFixedConfig } from "./config.ts";
 import { FOOTER_FIXED_EDITOR_FACTORY } from "./plugin-state.ts";
 import { renderEditorChrome } from "./editor-chrome.ts";
-import { getFastChromeLabel } from "./status-updater.ts";
+import { getFastChromeLabel, getProviderCompatChromeLabel } from "./status-updater.ts";
 import { findContainerWithChild } from "./utils.ts";
 
 /**
@@ -28,6 +28,7 @@ export function wrapEditorFactory(
         enabled: config.editorChrome,
         context: state.activeCtxRef,
         thinkingLevel: state.activeThinkingLevel,
+        providerCompatLabel: getProviderCompatChromeLabel(state.activeCtxRef, state.currentModelRef, config),
         fastLabel: getFastChromeLabel(state.activeCtxRef, state.currentModelRef, state.fastDesired, config.fast.supportedModels),
         borderColor: editor.borderColor,
         renderBase: originalRender,

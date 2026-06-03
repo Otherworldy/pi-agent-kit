@@ -469,6 +469,7 @@ test("editor chrome renders model, thinking level, context usage, git status, cw
     const lines = harness.mountedEditor.render(120);
     assert.ok(lines[0]?.includes("my-openai/gpt-5.5"));
     assert.ok(lines[0]?.includes("high"));
+    assert.ok(lines[0]?.includes("Codex"));
     assert.ok(lines[0]?.includes("ctx 42%/200k"));
     assert.ok(lines[0]?.includes("main"));
     assert.match(lines[0] ?? "", /clean|Δ/);
@@ -528,6 +529,11 @@ test("fast command toggles status, editor chrome label, and provider payload", a
     assert.ok(harness.sessionStart);
     await harness.sessionStart({ reason: "new" }, harness.ctx);
 
+    const { promise, state } = await harness.openSettings();
+    state.panel.settingsList.onChange("providerCompat", "false");
+    state.done();
+    await promise;
+
     assert.equal(await harness.emit("before_provider_request", { payload: { model: "gpt-5.5" } }), undefined);
     await harness.runCommand("fast", "on");
 
@@ -549,11 +555,6 @@ test("provider compat switch auto-registers Claude Code headers and patches Clau
     harness.ctx.model = { contextWindow: 200000, id: "claude-sonnet-4-5", provider: "my-claude", api: "openai-responses" };
     assert.ok(harness.sessionStart);
     await harness.sessionStart({ reason: "new" }, harness.ctx);
-
-    const { promise, state } = await harness.openSettings();
-    state.panel.settingsList.onChange("providerCompat", "true");
-    state.done();
-    await promise;
 
     const settings = JSON.parse(readFileSync(join(cwd, ".pi", "settings.json"), "utf-8"));
     assert.equal(settings.footerFixed.providerCompat.enabled, undefined);
@@ -585,11 +586,6 @@ test("provider compat switch auto-registers Codex headers and patches responses 
     harness.ctx.model = { contextWindow: 200000, id: "gpt-5.5", provider: "my-codex", api: "openai-codex-responses" };
     assert.ok(harness.sessionStart);
     await harness.sessionStart({ reason: "new" }, harness.ctx);
-
-    const { promise, state } = await harness.openSettings();
-    state.panel.settingsList.onChange("providerCompat", "true");
-    state.done();
-    await promise;
 
     const providerConfig = harness.providerRegistrations.get("my-codex") as { headers: Record<string, string> };
     assert.equal(providerConfig.headers.Originator, "codex_cli_rs");

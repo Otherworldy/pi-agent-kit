@@ -106,7 +106,7 @@ const DEFAULT_CONFIG: FooterFixedConfig = {
     supportedModels: [...DEFAULT_FAST_SUPPORTED_MODELS],
   },
   providerCompat: {
-    enabled: false,
+    enabled: true,
     claudeCodeHeaders: { ...DEFAULT_CLAUDE_CODE_COMPAT_HEADERS },
     codexHeaders: { ...DEFAULT_CODEX_COMPAT_HEADERS },
   },
