@@ -8,6 +8,7 @@ import {
   notifyTaskCompleteTelegram,
   shouldNotifyTaskCompletion,
   shouldNotifyTaskCompletionWindows,
+  shouldSendTaskCompletionNotification,
   supportsWindowsToast,
   taskCompletionNotificationMessage,
   type TelegramFetch,
@@ -109,12 +110,14 @@ test("task completion notification status is derived from the final assistant re
   );
 });
 
-test("task completion notification messages distinguish completion, interruption, and errors", () => {
-  assert.equal(taskCompletionNotificationMessage("completed").title, "任务已完成");
-  assert.equal(taskCompletionNotificationMessage("aborted").title, "任务已中断");
-  assert.equal(taskCompletionNotificationMessage("error").title, "任务出错");
-  assert.match(taskCompletionNotificationMessage("completed", "最后回答").body, /----- AI 回复 -----/);
-  assert.match(taskCompletionNotificationMessage("completed", "最后回答").body, /最后回答/);
+test("task completion notification messages use answers, fixed errors, and skip aborts", () => {
+  assert.equal(taskCompletionNotificationMessage("completed").title, "Pi Agent");
+  assert.equal(taskCompletionNotificationMessage("completed", "最后回答").body, "最后回答");
+  assert.equal(taskCompletionNotificationMessage("error", "不会发送这个回答").body, "任务出错，请回到本地查看详情。");
+  assert.equal(taskCompletionNotificationMessage("aborted", "不会发送这个回答").body, "");
+  assert.equal(shouldSendTaskCompletionNotification("completed"), true);
+  assert.equal(shouldSendTaskCompletionNotification("error"), true);
+  assert.equal(shouldSendTaskCompletionNotification("aborted"), false);
 });
 
 test("task completion notification answer is extracted from the last assistant message", () => {
@@ -145,25 +148,31 @@ test("Telegram task completion notification sends through configured channel", a
   assert.equal(requests[0].url, "https://telegram.example/api/bot123:abc/sendMessage");
   const params = new URLSearchParams(requests[0].body);
   assert.equal(params.get("chat_id"), "456");
-  assert.match(params.get("text") ?? "", /任务已完成/);
-  assert.match(params.get("text") ?? "", /----- AI 回复 -----/);
-  assert.match(params.get("text") ?? "", /最后回答/);
+  assert.equal(params.get("text"), "最后回答");
 });
 
-test("Telegram task completion notification skips missing credentials", async () => {
+test("Telegram task completion notification skips aborts and missing credentials", async () => {
   let called = false;
   const fetchImpl: TelegramFetch = async () => {
     called = true;
     return { ok: true, status: 200, text: async () => "" };
   };
 
-  const sent = await notifyTaskCompleteTelegram("completed", {
+  const aborted = await notifyTaskCompleteTelegram("aborted", {
+    enabled: true,
+    botToken: "123:abc",
+    chatId: "456",
+    apiBaseUrl: "https://telegram.example/api",
+    timeoutMs: 1000,
+  }, "不会发送这个回答", fetchImpl);
+  const missingCredentials = await notifyTaskCompleteTelegram("completed", {
     enabled: true,
     apiBaseUrl: "https://telegram.example/api",
     timeoutMs: 1000,
   }, undefined, fetchImpl);
 
-  assert.equal(sent, false);
+  assert.equal(aborted, false);
+  assert.equal(missingCredentials, false);
   assert.equal(called, false);
 });
 

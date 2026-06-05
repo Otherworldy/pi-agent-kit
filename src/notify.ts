@@ -5,25 +5,11 @@ import type { NotificationChannelsConfig, TelegramNotificationChannelConfig } fr
 
 export type TaskCompletionNotificationStatus = "completed" | "aborted" | "error";
 
-const WINDOWS_TOAST_MESSAGES: Record<TaskCompletionNotificationStatus, { title: string; body: string }> = {
-  completed: {
-    title: "任务已完成",
-    body: "Pi Agent 已完成任务，正在等待你的输入。",
-  },
-  aborted: {
-    title: "任务已中断",
-    body: "Pi Agent 任务已异常中断，正在等待你的输入。",
-  },
-  error: {
-    title: "任务出错",
-    body: "Pi Agent 任务遇到错误，正在等待你的输入。",
-  },
-};
+const TASK_COMPLETED_FALLBACK_TEXT = "任务已完成。";
+const TASK_ERROR_NOTIFICATION_TEXT = "任务出错，请回到本地查看详情。";
 const WINDOWS_TOAST_APP_ID = "Pi Agent";
-const NOTIFICATION_ANSWER_SEPARATOR = "----- AI 回复 -----";
-const WINDOWS_TOAST_ANSWER_LIMIT = 240;
+const WINDOWS_TOAST_BODY_LIMIT = 240;
 const TELEGRAM_MESSAGE_LIMIT = 4096;
-const TELEGRAM_ANSWER_LIMIT = 3800;
 
 const SUBAGENT_ENV_KEYS = [
   "PI_SUBAGENT_CHILD",
@@ -89,16 +75,15 @@ function powershellSingleQuoted(value: string): string {
   return `'${value.replace(/'/g, "''")}'`;
 }
 
-function windowsToastScript(title: string, body: string): string {
+function windowsToastScript(body: string): string {
   return [
     "$ErrorActionPreference = 'SilentlyContinue'",
     "try {",
     "[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] > $null",
-    "$template = [Windows.UI.Notifications.ToastTemplateType]::ToastText02",
+    "$template = [Windows.UI.Notifications.ToastTemplateType]::ToastText01",
     "$xml = [Windows.UI.Notifications.ToastNotificationManager]::GetTemplateContent($template)",
     "$texts = $xml.GetElementsByTagName('text')",
-    `$texts.Item(0).AppendChild($xml.CreateTextNode(${powershellSingleQuoted(title)})) > $null`,
-    `$texts.Item(1).AppendChild($xml.CreateTextNode(${powershellSingleQuoted(body)})) > $null`,
+    `$texts.Item(0).AppendChild($xml.CreateTextNode(${powershellSingleQuoted(body)})) > $null`,
     "$toast = [Windows.UI.Notifications.ToastNotification]::new($xml)",
     `[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier(${powershellSingleQuoted(WINDOWS_TOAST_APP_ID)}).Show($toast)`,
     "} catch {}",
@@ -149,24 +134,35 @@ export function getTaskCompletionNotificationStatus(messages: readonly unknown[]
   return "completed";
 }
 
+export function shouldSendTaskCompletionNotification(status: TaskCompletionNotificationStatus): boolean {
+  return status !== "aborted";
+}
+
+function taskCompletionNotificationText(
+  status: TaskCompletionNotificationStatus,
+  answer?: string,
+  limit: number = WINDOWS_TOAST_BODY_LIMIT,
+): string {
+  if (status === "aborted") return "";
+  if (status === "error") return TASK_ERROR_NOTIFICATION_TEXT;
+
+  const normalizedAnswer = answer?.trim();
+  return truncateText(normalizedAnswer || TASK_COMPLETED_FALLBACK_TEXT, limit);
+}
+
 export function taskCompletionNotificationMessage(
   status: TaskCompletionNotificationStatus,
   answer?: string,
-  answerLimit: number = WINDOWS_TOAST_ANSWER_LIMIT,
+  bodyLimit: number = WINDOWS_TOAST_BODY_LIMIT,
 ): { title: string; body: string } {
-  const message = WINDOWS_TOAST_MESSAGES[status];
-  const normalizedAnswer = answer?.trim();
-  if (!normalizedAnswer) return message;
-
   return {
-    title: message.title,
-    body: `${message.body}\n\n${NOTIFICATION_ANSWER_SEPARATOR}\n${truncateText(normalizedAnswer, answerLimit)}`,
+    title: WINDOWS_TOAST_APP_ID,
+    body: taskCompletionNotificationText(status, answer, bodyLimit),
   };
 }
 
 function telegramNotificationText(status: TaskCompletionNotificationStatus, answer?: string): string {
-  const { title, body } = taskCompletionNotificationMessage(status, answer, TELEGRAM_ANSWER_LIMIT);
-  return truncateText(`${title}\n${body}`, TELEGRAM_MESSAGE_LIMIT);
+  return taskCompletionNotificationText(status, answer, TELEGRAM_MESSAGE_LIMIT);
 }
 
 export function isSubagentProcess(env: Env = process.env, argv: readonly string[] = process.argv): boolean {
@@ -221,9 +217,9 @@ export function notifyTaskCompleteWindows(
   env: Env = process.env,
   platform: NodeJS.Platform = process.platform,
 ): void {
-  if (!supportsWindowsToast(platform, env)) return;
+  if (!shouldSendTaskCompletionNotification(status) || !supportsWindowsToast(platform, env)) return;
 
-  const { title, body } = taskCompletionNotificationMessage(status, answer);
+  const { body } = taskCompletionNotificationMessage(status, answer);
 
   try {
     execFile(
@@ -233,7 +229,7 @@ export function notifyTaskCompleteWindows(
         "-ExecutionPolicy",
         "Bypass",
         "-EncodedCommand",
-        Buffer.from(windowsToastScript(title, body), "utf16le").toString("base64"),
+        Buffer.from(windowsToastScript(body), "utf16le").toString("base64"),
       ],
       { windowsHide: true, timeout: 5000, maxBuffer: 1024 },
       () => {},
@@ -261,7 +257,7 @@ export async function notifyTaskCompleteTelegram(
   answer?: string,
   fetchImpl: TelegramFetch | undefined = defaultTelegramFetch,
 ): Promise<boolean> {
-  if (!config.enabled) return false;
+  if (!config.enabled || !shouldSendTaskCompletionNotification(status)) return false;
 
   const botToken = readTelegramBotToken(config);
   const chatId = readTelegramChatId(config);
@@ -303,6 +299,7 @@ export function notifyTaskComplete(
   channels: NotificationChannelsConfig,
   answer?: string,
 ): void {
+  if (!shouldSendTaskCompletionNotification(status)) return;
   if (channels.windowsToast.enabled) notifyTaskCompleteWindows(status, answer);
   if (channels.telegram.enabled) void notifyTaskCompleteTelegram(status, channels.telegram, answer);
 }
