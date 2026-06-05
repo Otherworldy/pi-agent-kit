@@ -17,7 +17,7 @@ import {
   patchClaudeCodeCompatPayload,
   patchCodexCompatPayload,
 } from "./provider-compat.ts";
-import { getTaskCompletionNotificationStatus, notifyTaskCompleteWindows, shouldNotifyTaskCompletion } from "./notify.ts";
+import { getTaskCompletionNotificationAnswer, getTaskCompletionNotificationStatus, notifyTaskComplete, shouldNotifyTaskCompletion } from "./notify.ts";
 import { showFooterFixedSettingsPanel } from "./settings-panel.ts";
 import { createPluginState, resetPluginState, cleanupPluginState } from "./plugin-state.ts";
 import type { PluginState } from "./plugin-state.ts";
@@ -132,6 +132,22 @@ export default function footerFixedPlugin(pi: ExtensionAPI) {
       config.codexCompat.enabled = value;
       refreshProviderCompatProviders(ctx);
       updateProviderStatuses(ctx, state.currentModelRef, state.fastDesired, config);
+      return;
+    }
+
+    if (key === "notificationChannels.windowsToast.enabled") {
+      if (config.notificationChannels.windowsToast.enabled === value) return;
+      config.notificationChannels.windowsToast.enabled = value;
+      const persisted = writeFooterFixedSetting(ctx.cwd, { notificationChannels: { windowsToast: { enabled: value } } });
+      if (!persisted) notify(ctx, "pi-footer-fixed setting changed but was not persisted; check settings.json", "warning");
+      return;
+    }
+
+    if (key === "notificationChannels.telegram.enabled") {
+      if (config.notificationChannels.telegram.enabled === value) return;
+      config.notificationChannels.telegram.enabled = value;
+      const persisted = writeFooterFixedSetting(ctx.cwd, { notificationChannels: { telegram: { enabled: value } } });
+      if (!persisted) notify(ctx, "pi-footer-fixed setting changed but was not persisted; check settings.json", "warning");
       return;
     }
 
@@ -302,8 +318,12 @@ export default function footerFixedPlugin(pi: ExtensionAPI) {
   });
 
   pi.on("agent_end", async (event, ctx) => {
-    if (config.taskCompletionNotification && shouldNotifyTaskCompletion(ctx)) {
-      notifyTaskCompleteWindows(getTaskCompletionNotificationStatus(event.messages));
+    if (shouldNotifyTaskCompletion(ctx)) {
+      notifyTaskComplete(
+        getTaskCompletionNotificationStatus(event.messages),
+        config.notificationChannels,
+        getTaskCompletionNotificationAnswer(event.messages),
+      );
     }
   });
 

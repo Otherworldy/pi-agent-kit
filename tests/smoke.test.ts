@@ -425,18 +425,20 @@ test("settings overlay changes defer fixed-editor reinstall without warning fall
   });
 });
 
-test("settings overlay persists task completion notification toggle", async () => {
+test("settings overlay persists local and Telegram notification toggles", async () => {
   await withTempSettings(async ({ cwd }) => {
     const harness = createHarness(cwd);
     await harness.startWithMountedEditor();
 
     const { promise, state } = await harness.openSettings();
-    state.panel.settingsList.onChange("taskCompletionNotification", "false");
+    state.panel.settingsList.onChange("notificationChannels.windowsToast.enabled", "false");
+    state.panel.settingsList.onChange("notificationChannels.telegram.enabled", "true");
     state.done();
     await promise;
 
     const settings = JSON.parse(readFileSync(join(cwd, ".pi", "settings.json"), "utf-8"));
-    assert.equal(settings.footerFixed.taskCompletionNotification, false);
+    assert.equal(settings.footerFixed.notificationChannels.windowsToast.enabled, false);
+    assert.equal(settings.footerFixed.notificationChannels.telegram.enabled, true);
   });
 });
 

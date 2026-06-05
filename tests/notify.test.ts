@@ -2,23 +2,33 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { nextFooterFixedSetting, parseFooterFixedConfig } from "../src/config.ts";
 import {
+  getTaskCompletionNotificationAnswer,
   getTaskCompletionNotificationStatus,
   isSubagentProcess,
+  notifyTaskCompleteTelegram,
   shouldNotifyTaskCompletion,
+  shouldNotifyTaskCompletionWindows,
   supportsWindowsToast,
   taskCompletionNotificationMessage,
+  type TelegramFetch,
 } from "../src/notify.ts";
 
-test("task completion notifications are main interactive Windows or WSL agent only", () => {
-  assert.equal(shouldNotifyTaskCompletion({ hasUI: true }, {}, ["node", "pi"], "win32"), true);
-  assert.equal(shouldNotifyTaskCompletion({ hasUI: false }, {}, ["node", "pi"], "win32"), false);
-  assert.equal(shouldNotifyTaskCompletion({ hasUI: true }, {}, ["node", "pi"], "linux"), false);
+test("task completion notifications are main interactive agent only", () => {
+  assert.equal(shouldNotifyTaskCompletion({ hasUI: true }, {}, ["node", "pi"]), true);
+  assert.equal(shouldNotifyTaskCompletion({ hasUI: false }, {}, ["node", "pi"]), false);
+  assert.equal(shouldNotifyTaskCompletion({ hasUI: true }, { PI_SUBAGENT_CHILD: "1" }, ["node", "pi"]), false);
+});
+
+test("Windows task completion notifications require Windows toast support", () => {
+  assert.equal(shouldNotifyTaskCompletionWindows({ hasUI: true }, {}, ["node", "pi"], "win32"), true);
+  assert.equal(shouldNotifyTaskCompletionWindows({ hasUI: false }, {}, ["node", "pi"], "win32"), false);
+  assert.equal(shouldNotifyTaskCompletionWindows({ hasUI: true }, {}, ["node", "pi"], "linux"), false);
 
   const wslEnv = { WSL_DISTRO_NAME: "Ubuntu" };
   assert.equal(supportsWindowsToast("linux", wslEnv), true);
-  assert.equal(shouldNotifyTaskCompletion({ hasUI: true }, wslEnv, ["node", "pi"], "linux"), true);
+  assert.equal(shouldNotifyTaskCompletionWindows({ hasUI: true }, wslEnv, ["node", "pi"], "linux"), true);
   assert.equal(
-    shouldNotifyTaskCompletion({ hasUI: true }, { ...wslEnv, PI_SUBAGENT_CHILD: "1" }, ["node", "pi"], "linux"),
+    shouldNotifyTaskCompletionWindows({ hasUI: true }, { ...wslEnv, PI_SUBAGENT_CHILD: "1" }, ["node", "pi"], "linux"),
     false,
   );
 });
@@ -30,6 +40,35 @@ test("task completion notifications, editor chrome, and fast defaults are config
   assert.equal(parseFooterFixedConfig({ footerFixed: { editorChrome: false } }).editorChrome, false);
   assert.equal(parseFooterFixedConfig({}).fast.enabled, false);
   assert.equal(parseFooterFixedConfig({ footerFixed: { fast: { enabled: true, supportedModels: ["my-openai/gpt-5.5"] } } }).fast.supportedModels[0], "my-openai/gpt-5.5");
+  assert.equal(parseFooterFixedConfig({}).notificationChannels.windowsToast.enabled, true);
+  assert.equal(parseFooterFixedConfig({ footerFixed: { taskCompletionNotification: false } }).notificationChannels.windowsToast.enabled, false);
+  assert.equal(parseFooterFixedConfig({}).notificationChannels.telegram.enabled, false);
+  const telegramConfig = parseFooterFixedConfig({
+    footerFixed: {
+      notificationChannels: {
+        telegram: {
+          enabled: true,
+          botToken: "123:abc",
+          chatId: "123456789",
+          timeoutMs: 1000,
+        },
+      },
+    },
+  }).notificationChannels.telegram;
+  assert.equal(telegramConfig.enabled, true);
+  assert.equal(telegramConfig.botToken, "123:abc");
+  assert.equal(telegramConfig.chatId, "123456789");
+  assert.equal(telegramConfig.apiBaseUrl, "https://api.telegram.org");
+  assert.equal(telegramConfig.timeoutMs, 1000);
+  assert.equal(parseFooterFixedConfig({
+    footerFixed: {
+      notificationChannels: {
+        telegram: {
+          chatId: -1001234567890,
+        },
+      },
+    },
+  }).notificationChannels.telegram.chatId, "-1001234567890");
   assert.equal(parseFooterFixedConfig({}).providerCompat.enabled, true);
   assert.equal(parseFooterFixedConfig({}).claudeCodeCompat.enabled, true);
   assert.equal(parseFooterFixedConfig({}).codexCompat.enabled, true);
@@ -74,6 +113,58 @@ test("task completion notification messages distinguish completion, interruption
   assert.equal(taskCompletionNotificationMessage("completed").title, "任务已完成");
   assert.equal(taskCompletionNotificationMessage("aborted").title, "任务已中断");
   assert.equal(taskCompletionNotificationMessage("error").title, "任务出错");
+  assert.match(taskCompletionNotificationMessage("completed", "最后回答").body, /----- AI 回复 -----/);
+  assert.match(taskCompletionNotificationMessage("completed", "最后回答").body, /最后回答/);
+});
+
+test("task completion notification answer is extracted from the last assistant message", () => {
+  assert.equal(getTaskCompletionNotificationAnswer([
+    { role: "assistant", content: "first" },
+    { role: "user", content: "next" },
+    { role: "assistant", content: [{ type: "text", text: "final answer" }] },
+  ]), "final answer");
+  assert.equal(getTaskCompletionNotificationAnswer([{ role: "user", content: "hi" }]), undefined);
+});
+
+test("Telegram task completion notification sends through configured channel", async () => {
+  const requests: Array<{ url: string; body: string }> = [];
+  const fetchImpl: TelegramFetch = async (url, init) => {
+    requests.push({ url, body: init.body });
+    return { ok: true, status: 200, text: async () => "" };
+  };
+
+  const sent = await notifyTaskCompleteTelegram("completed", {
+    enabled: true,
+    botToken: "123:abc",
+    chatId: "456",
+    apiBaseUrl: "https://telegram.example/api/",
+    timeoutMs: 1000,
+  }, "最后回答", fetchImpl);
+
+  assert.equal(sent, true);
+  assert.equal(requests[0].url, "https://telegram.example/api/bot123:abc/sendMessage");
+  const params = new URLSearchParams(requests[0].body);
+  assert.equal(params.get("chat_id"), "456");
+  assert.match(params.get("text") ?? "", /任务已完成/);
+  assert.match(params.get("text") ?? "", /----- AI 回复 -----/);
+  assert.match(params.get("text") ?? "", /最后回答/);
+});
+
+test("Telegram task completion notification skips missing credentials", async () => {
+  let called = false;
+  const fetchImpl: TelegramFetch = async () => {
+    called = true;
+    return { ok: true, status: 200, text: async () => "" };
+  };
+
+  const sent = await notifyTaskCompleteTelegram("completed", {
+    enabled: true,
+    apiBaseUrl: "https://telegram.example/api",
+    timeoutMs: 1000,
+  }, undefined, fetchImpl);
+
+  assert.equal(sent, false);
+  assert.equal(called, false);
 });
 
 test("subagent processes are detected from pi-subagents environment", () => {

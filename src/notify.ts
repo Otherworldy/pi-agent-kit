@@ -1,5 +1,7 @@
 import { execFile } from "node:child_process";
 import { readFileSync } from "node:fs";
+import { EnvHttpProxyAgent, fetch as undiciFetch } from "undici";
+import type { NotificationChannelsConfig, TelegramNotificationChannelConfig } from "./config.ts";
 
 export type TaskCompletionNotificationStatus = "completed" | "aborted" | "error";
 
@@ -18,6 +20,10 @@ const WINDOWS_TOAST_MESSAGES: Record<TaskCompletionNotificationStatus, { title: 
   },
 };
 const WINDOWS_TOAST_APP_ID = "Pi Agent";
+const NOTIFICATION_ANSWER_SEPARATOR = "----- AI 回复 -----";
+const WINDOWS_TOAST_ANSWER_LIMIT = 240;
+const TELEGRAM_MESSAGE_LIMIT = 4096;
+const TELEGRAM_ANSWER_LIMIT = 3800;
 
 const SUBAGENT_ENV_KEYS = [
   "PI_SUBAGENT_CHILD",
@@ -26,13 +32,53 @@ const SUBAGENT_ENV_KEYS = [
   "PI_SUBAGENT_CHILD_INDEX",
 ] as const;
 
+const PROXY_ENV_KEYS = [
+  "HTTPS_PROXY",
+  "https_proxy",
+  "HTTP_PROXY",
+  "http_proxy",
+  "ALL_PROXY",
+  "all_proxy",
+] as const;
+
 type Env = NodeJS.ProcessEnv;
+
+type TelegramFetchResponse = {
+  ok: boolean;
+  status: number;
+  text: () => Promise<string>;
+};
+
+export type TelegramFetch = (
+  url: string,
+  init: {
+    method: "POST";
+    headers: Record<string, string>;
+    body: string;
+    signal?: AbortSignal;
+  },
+) => Promise<TelegramFetchResponse>;
 
 type AssistantLikeMessage = {
   role?: unknown;
   stopReason?: unknown;
   errorMessage?: unknown;
+  content?: unknown;
+  text?: unknown;
+  message?: unknown;
 };
+
+let telegramProxyAgent: EnvHttpProxyAgent | undefined;
+
+function hasProxyEnv(env: Env = process.env): boolean {
+  return PROXY_ENV_KEYS.some((key) => Boolean(env[key]));
+}
+
+function defaultTelegramFetch(url: string, init: Parameters<TelegramFetch>[1]): Promise<TelegramFetchResponse> {
+  const dispatcher = hasProxyEnv() ? telegramProxyAgent ??= new EnvHttpProxyAgent() : undefined;
+  const requestInit = dispatcher ? { ...init, dispatcher } : init;
+  return undiciFetch(url, requestInit as any) as unknown as Promise<TelegramFetchResponse>;
+}
 
 function getArgValue(argv: readonly string[], flag: string): string | undefined {
   const index = argv.indexOf(flag);
@@ -63,6 +109,34 @@ function isAssistantMessage(message: unknown): message is AssistantLikeMessage {
   return typeof message === "object" && message !== null && (message as AssistantLikeMessage).role === "assistant";
 }
 
+function textFromContent(content: unknown): string | undefined {
+  if (typeof content === "string") return content.trim() || undefined;
+  if (Array.isArray(content)) {
+    const parts = content.map(textFromContent).filter((part): part is string => Boolean(part));
+    return parts.length > 0 ? parts.join("\n\n") : undefined;
+  }
+  if (typeof content !== "object" || content === null) return undefined;
+
+  const record = content as Record<string, unknown>;
+  if (typeof record.text === "string") return record.text.trim() || undefined;
+  if (typeof record.content === "string") return record.content.trim() || undefined;
+  return textFromContent(record.content);
+}
+
+function assistantMessageText(message: AssistantLikeMessage): string | undefined {
+  return textFromContent(message.content) ?? textFromContent(message.text) ?? textFromContent(message.message);
+}
+
+function truncateText(text: string, limit: number): string {
+  if (text.length <= limit) return text;
+  return `${text.slice(0, Math.max(0, limit - 1)).trimEnd()}…`;
+}
+
+export function getTaskCompletionNotificationAnswer(messages: readonly unknown[]): string | undefined {
+  const lastAssistantMessage = [...messages].reverse().find(isAssistantMessage);
+  return lastAssistantMessage ? assistantMessageText(lastAssistantMessage) : undefined;
+}
+
 export function getTaskCompletionNotificationStatus(messages: readonly unknown[]): TaskCompletionNotificationStatus {
   const lastAssistantMessage = [...messages].reverse().find(isAssistantMessage);
   const stopReason = typeof lastAssistantMessage?.stopReason === "string" ? lastAssistantMessage.stopReason : undefined;
@@ -75,8 +149,24 @@ export function getTaskCompletionNotificationStatus(messages: readonly unknown[]
   return "completed";
 }
 
-export function taskCompletionNotificationMessage(status: TaskCompletionNotificationStatus): { title: string; body: string } {
-  return WINDOWS_TOAST_MESSAGES[status];
+export function taskCompletionNotificationMessage(
+  status: TaskCompletionNotificationStatus,
+  answer?: string,
+  answerLimit: number = WINDOWS_TOAST_ANSWER_LIMIT,
+): { title: string; body: string } {
+  const message = WINDOWS_TOAST_MESSAGES[status];
+  const normalizedAnswer = answer?.trim();
+  if (!normalizedAnswer) return message;
+
+  return {
+    title: message.title,
+    body: `${message.body}\n\n${NOTIFICATION_ANSWER_SEPARATOR}\n${truncateText(normalizedAnswer, answerLimit)}`,
+  };
+}
+
+function telegramNotificationText(status: TaskCompletionNotificationStatus, answer?: string): string {
+  const { title, body } = taskCompletionNotificationMessage(status, answer, TELEGRAM_ANSWER_LIMIT);
+  return truncateText(`${title}\n${body}`, TELEGRAM_MESSAGE_LIMIT);
 }
 
 export function isSubagentProcess(env: Env = process.env, argv: readonly string[] = process.argv): boolean {
@@ -112,15 +202,28 @@ export function shouldNotifyTaskCompletion(
   ctx: { hasUI?: boolean } | null | undefined,
   env: Env = process.env,
   argv: readonly string[] = process.argv,
-  platform: NodeJS.Platform = process.platform,
 ): boolean {
-  return supportsWindowsToast(platform, env) && ctx?.hasUI === true && !isSubagentProcess(env, argv);
+  return ctx?.hasUI === true && !isSubagentProcess(env, argv);
 }
 
-export function notifyTaskCompleteWindows(status: TaskCompletionNotificationStatus = "completed"): void {
-  if (!supportsWindowsToast()) return;
+export function shouldNotifyTaskCompletionWindows(
+  ctx: { hasUI?: boolean } | null | undefined,
+  env: Env = process.env,
+  argv: readonly string[] = process.argv,
+  platform: NodeJS.Platform = process.platform,
+): boolean {
+  return supportsWindowsToast(platform, env) && shouldNotifyTaskCompletion(ctx, env, argv);
+}
 
-  const { title, body } = taskCompletionNotificationMessage(status);
+export function notifyTaskCompleteWindows(
+  status: TaskCompletionNotificationStatus = "completed",
+  answer?: string,
+  env: Env = process.env,
+  platform: NodeJS.Platform = process.platform,
+): void {
+  if (!supportsWindowsToast(platform, env)) return;
+
+  const { title, body } = taskCompletionNotificationMessage(status, answer);
 
   try {
     execFile(
@@ -138,4 +241,68 @@ export function notifyTaskCompleteWindows(status: TaskCompletionNotificationStat
   } catch {
     // Notifications must never affect the agent loop.
   }
+}
+
+function readTelegramBotToken(config: TelegramNotificationChannelConfig): string | undefined {
+  return config.botToken?.trim();
+}
+
+function readTelegramChatId(config: TelegramNotificationChannelConfig): string | undefined {
+  return config.chatId?.trim();
+}
+
+function telegramApiUrl(config: TelegramNotificationChannelConfig, botToken: string): string {
+  return `${config.apiBaseUrl.trim().replace(/\/+$/, "")}/bot${botToken}/sendMessage`;
+}
+
+export async function notifyTaskCompleteTelegram(
+  status: TaskCompletionNotificationStatus = "completed",
+  config: TelegramNotificationChannelConfig,
+  answer?: string,
+  fetchImpl: TelegramFetch | undefined = defaultTelegramFetch,
+): Promise<boolean> {
+  if (!config.enabled) return false;
+
+  const botToken = readTelegramBotToken(config);
+  const chatId = readTelegramChatId(config);
+  if (!botToken || !chatId || typeof fetchImpl !== "function") return false;
+
+  const params = new URLSearchParams({
+    chat_id: chatId,
+    text: telegramNotificationText(status, answer),
+    disable_web_page_preview: "true",
+  });
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), Math.max(1, config.timeoutMs));
+
+  try {
+    const response = await fetchImpl(telegramApiUrl(config, botToken), {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: params.toString(),
+      signal: controller.signal,
+    });
+
+    if (!response.ok) {
+      const responseBody = await response.text().catch(() => "");
+      console.debug(`[pi-footer-fixed] Telegram notification failed with status ${response.status}: ${responseBody}`);
+      return false;
+    }
+
+    return true;
+  } catch (error) {
+    console.debug("[pi-footer-fixed] Telegram notification failed:", error);
+    return false;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+export function notifyTaskComplete(
+  status: TaskCompletionNotificationStatus = "completed",
+  channels: NotificationChannelsConfig,
+  answer?: string,
+): void {
+  if (channels.windowsToast.enabled) notifyTaskCompleteWindows(status, answer);
+  if (channels.telegram.enabled) void notifyTaskCompleteTelegram(status, channels.telegram, answer);
 }

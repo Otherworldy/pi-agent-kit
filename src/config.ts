@@ -24,6 +24,23 @@ export interface CodexCompatConfig extends ProviderCompatConfig {
   store: boolean;
 }
 
+export interface WindowsToastNotificationChannelConfig {
+  enabled: boolean;
+}
+
+export interface TelegramNotificationChannelConfig {
+  enabled: boolean;
+  botToken?: string;
+  chatId?: string;
+  apiBaseUrl: string;
+  timeoutMs: number;
+}
+
+export interface NotificationChannelsConfig {
+  windowsToast: WindowsToastNotificationChannelConfig;
+  telegram: TelegramNotificationChannelConfig;
+}
+
 export interface ProviderCompatSwitchConfig {
   enabled: boolean;
   claudeCodeHeaders: Record<string, string>;
@@ -35,6 +52,7 @@ export interface FooterFixedConfig {
   mouseScroll: boolean;
   showExtensionStatus: boolean;
   taskCompletionNotification: boolean;
+  notificationChannels: NotificationChannelsConfig;
   editorChrome: boolean;
   fast: FastModeConfig;
   providerCompat: ProviderCompatSwitchConfig;
@@ -47,12 +65,18 @@ export type FooterFixedBooleanSettingKey =
   | "mouseScroll"
   | "showExtensionStatus"
   | "taskCompletionNotification"
+  | "notificationChannels.windowsToast.enabled"
+  | "notificationChannels.telegram.enabled"
   | "editorChrome"
   | "providerCompat"
   | "fast.enabled";
 
-export type FooterFixedConfigUpdates = Partial<Omit<FooterFixedConfig, "fast" | "providerCompat" | "claudeCodeCompat" | "codexCompat">> & {
+export type FooterFixedConfigUpdates = Partial<Omit<FooterFixedConfig, "fast" | "notificationChannels" | "providerCompat" | "claudeCodeCompat" | "codexCompat">> & {
   fast?: Partial<FastModeConfig>;
+  notificationChannels?: {
+    windowsToast?: Partial<WindowsToastNotificationChannelConfig>;
+    telegram?: Partial<TelegramNotificationChannelConfig>;
+  };
   providerCompat?: Partial<ProviderCompatSwitchConfig>;
   claudeCodeCompat?: Partial<ProviderCompatConfig>;
   codexCompat?: Partial<CodexCompatConfig>;
@@ -98,6 +122,16 @@ const DEFAULT_CONFIG: FooterFixedConfig = {
   mouseScroll: true,
   showExtensionStatus: true,
   taskCompletionNotification: true,
+  notificationChannels: {
+    windowsToast: {
+      enabled: true,
+    },
+    telegram: {
+      enabled: false,
+      apiBaseUrl: "https://api.telegram.org",
+      timeoutMs: 5000,
+    },
+  },
   editorChrome: true,
   fast: {
     enabled: false,
@@ -209,6 +243,27 @@ function stringFromObject(value: unknown, key: string, fallback: string): string
   return typeof item === "string" ? item : fallback;
 }
 
+function optionalStringFromObject(value: unknown, key: string): string | undefined {
+  if (!isRecord(value)) return undefined;
+  const item = value[key];
+  return typeof item === "string" && item.trim().length > 0 ? item : undefined;
+}
+
+function optionalChatIdFromObject(value: unknown, key: string): string | undefined {
+  if (!isRecord(value)) return undefined;
+  const item = value[key];
+  if (typeof item === "string" && item.trim().length > 0) return item;
+  if (typeof item === "number" && Number.isFinite(item)) return String(item);
+  return undefined;
+}
+
+function numberFromObject(value: unknown, key: string, fallback: number, min = 0): number {
+  if (!isRecord(value)) return fallback;
+  const item = value[key];
+  if (typeof item !== "number" || !Number.isFinite(item)) return fallback;
+  return item >= min ? item : fallback;
+}
+
 function stringArrayFromObject(value: unknown, key: string, fallback: readonly string[]): string[] {
   if (!isRecord(value)) return [...fallback];
   const item = value[key];
@@ -251,6 +306,31 @@ function parseFastConfig(footerFixed: unknown): FastModeConfig {
     persistState: boolFromObject(fast, "persistState") ?? DEFAULT_CONFIG.fast.persistState,
     serviceTier: stringFromObject(fast, "serviceTier", DEFAULT_CONFIG.fast.serviceTier),
     supportedModels: stringArrayFromObject(fast, "supportedModels", DEFAULT_CONFIG.fast.supportedModels),
+  };
+}
+
+function parseNotificationChannelsConfig(footerFixed: unknown): NotificationChannelsConfig {
+  const channels = isRecord(footerFixed) ? footerFixed.notificationChannels : undefined;
+  const windowsToast = isRecord(channels) ? channels.windowsToast : undefined;
+  const telegram = isRecord(channels) && isRecord(channels.telegram)
+    ? channels.telegram
+    : isRecord(footerFixed)
+      ? footerFixed.telegramNotification
+      : undefined;
+
+  return {
+    windowsToast: {
+      enabled: boolFromObject(windowsToast, "enabled")
+        ?? boolFromObject(footerFixed, "taskCompletionNotification")
+        ?? DEFAULT_CONFIG.notificationChannels.windowsToast.enabled,
+    },
+    telegram: {
+      enabled: boolFromObject(telegram, "enabled") ?? DEFAULT_CONFIG.notificationChannels.telegram.enabled,
+      botToken: optionalStringFromObject(telegram, "botToken"),
+      chatId: optionalChatIdFromObject(telegram, "chatId"),
+      apiBaseUrl: stringFromObject(telegram, "apiBaseUrl", DEFAULT_CONFIG.notificationChannels.telegram.apiBaseUrl),
+      timeoutMs: numberFromObject(telegram, "timeoutMs", DEFAULT_CONFIG.notificationChannels.telegram.timeoutMs, 1),
+    },
   };
 }
 
@@ -325,6 +405,7 @@ export function parseFooterFixedConfig(settings: Record<string, unknown>): Foote
       ?? DEFAULT_CONFIG.showExtensionStatus,
     taskCompletionNotification: boolFromObject(footerFixed, "taskCompletionNotification")
       ?? DEFAULT_CONFIG.taskCompletionNotification,
+    notificationChannels: parseNotificationChannelsConfig(footerFixed),
     editorChrome: boolFromObject(footerFixed, "editorChrome")
       ?? DEFAULT_CONFIG.editorChrome,
     fast: parseFastConfig(footerFixed),

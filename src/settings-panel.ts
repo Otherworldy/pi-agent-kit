@@ -78,10 +78,17 @@ export class FooterFixedSettingsPanel extends Container {
         values: ["true", "false"],
       },
       {
-        id: "taskCompletionNotification",
-        label: "Task completion notification",
+        id: "notificationChannels.windowsToast.enabled",
+        label: "Local task notification",
         description: "Send a Windows toast notification when the main interactive Pi Agent finishes a task.",
-        currentValue: options.config.taskCompletionNotification ? "true" : "false",
+        currentValue: options.config.notificationChannels.windowsToast.enabled ? "true" : "false",
+        values: ["true", "false"],
+      },
+      {
+        id: "notificationChannels.telegram.enabled",
+        label: "Telegram task notification",
+        description: "Send a Telegram push notification when the main interactive Pi Agent finishes a task.",
+        currentValue: options.config.notificationChannels.telegram.enabled ? "true" : "false",
         values: ["true", "false"],
       },
       {
