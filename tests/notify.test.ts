@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { nextFooterFixedSetting, parseFooterFixedConfig } from "../src/config.ts";
+import { nextAgentKitSetting, parseAgentKitConfig } from "../src/config.ts";
 import {
   getTaskCompletionNotificationAnswer,
   getTaskCompletionNotificationStatus,
@@ -35,17 +35,17 @@ test("Windows task completion notifications require Windows toast support", () =
 });
 
 test("task completion notifications, editor chrome, and fast defaults are configurable", () => {
-  assert.equal(parseFooterFixedConfig({}).taskCompletionNotification, true);
-  assert.equal(parseFooterFixedConfig({ footerFixed: { taskCompletionNotification: false } }).taskCompletionNotification, false);
-  assert.equal(parseFooterFixedConfig({}).editorChrome, true);
-  assert.equal(parseFooterFixedConfig({ footerFixed: { editorChrome: false } }).editorChrome, false);
-  assert.equal(parseFooterFixedConfig({}).fast.enabled, false);
-  assert.equal(parseFooterFixedConfig({ footerFixed: { fast: { enabled: true, supportedModels: ["my-openai/gpt-5.5"] } } }).fast.supportedModels[0], "my-openai/gpt-5.5");
-  assert.equal(parseFooterFixedConfig({}).notificationChannels.windowsToast.enabled, true);
-  assert.equal(parseFooterFixedConfig({ footerFixed: { taskCompletionNotification: false } }).notificationChannels.windowsToast.enabled, false);
-  assert.equal(parseFooterFixedConfig({}).notificationChannels.telegram.enabled, false);
-  const telegramConfig = parseFooterFixedConfig({
-    footerFixed: {
+  assert.equal(parseAgentKitConfig({}).taskCompletionNotification, true);
+  assert.equal(parseAgentKitConfig({ agentKit: { taskCompletionNotification: false } }).taskCompletionNotification, false);
+  assert.equal(parseAgentKitConfig({}).editorChrome, true);
+  assert.equal(parseAgentKitConfig({ agentKit: { editorChrome: false } }).editorChrome, false);
+  assert.equal(parseAgentKitConfig({}).fast.enabled, false);
+  assert.equal(parseAgentKitConfig({ agentKit: { fast: { enabled: true, supportedModels: ["my-openai/gpt-5.5"] } } }).fast.supportedModels[0], "my-openai/gpt-5.5");
+  assert.equal(parseAgentKitConfig({}).notificationChannels.windowsToast.enabled, true);
+  assert.equal(parseAgentKitConfig({ agentKit: { taskCompletionNotification: false } }).notificationChannels.windowsToast.enabled, false);
+  assert.equal(parseAgentKitConfig({}).notificationChannels.telegram.enabled, false);
+  const telegramConfig = parseAgentKitConfig({
+    agentKit: {
       notificationChannels: {
         telegram: {
           enabled: true,
@@ -61,8 +61,8 @@ test("task completion notifications, editor chrome, and fast defaults are config
   assert.equal(telegramConfig.chatId, "123456789");
   assert.equal(telegramConfig.apiBaseUrl, "https://api.telegram.org");
   assert.equal(telegramConfig.timeoutMs, 1000);
-  assert.equal(parseFooterFixedConfig({
-    footerFixed: {
+  assert.equal(parseAgentKitConfig({
+    agentKit: {
       notificationChannels: {
         telegram: {
           chatId: -1001234567890,
@@ -70,11 +70,11 @@ test("task completion notifications, editor chrome, and fast defaults are config
       },
     },
   }).notificationChannels.telegram.chatId, "-1001234567890");
-  assert.equal(parseFooterFixedConfig({}).providerCompat.enabled, true);
-  assert.equal(parseFooterFixedConfig({}).claudeCodeCompat.enabled, true);
-  assert.equal(parseFooterFixedConfig({}).codexCompat.enabled, true);
-  const providerCompatConfig = parseFooterFixedConfig({
-    footerFixed: {
+  assert.equal(parseAgentKitConfig({}).providerCompat.enabled, true);
+  assert.equal(parseAgentKitConfig({}).claudeCodeCompat.enabled, true);
+  assert.equal(parseAgentKitConfig({}).codexCompat.enabled, true);
+  const providerCompatConfig = parseAgentKitConfig({
+    agentKit: {
       providerCompat: {
         enabled: true,
         claudeCodeHeaders: { "User-Agent": "claude-cli/test" },
@@ -89,8 +89,8 @@ test("task completion notifications, editor chrome, and fast defaults are config
   assert.equal(providerCompatConfig.claudeCodeCompat.headers["Anthropic-Version"], "2023-06-01");
   assert.equal(providerCompatConfig.codexCompat.headers["X-Codex-Beta-Features"], "remote_compaction_v2");
   assert.equal(providerCompatConfig.codexCompat.headers.Originator, "codex_cli_rs");
-  assert.equal(parseFooterFixedConfig({ footerFixed: { providerCompat: { enabled: false } } }).claudeCodeCompat.enabled, true);
-  assert.deepEqual(nextFooterFixedSetting(undefined, { editorChrome: false }), { editorChrome: false });
+  assert.equal(parseAgentKitConfig({ agentKit: { providerCompat: { enabled: false } } }).claudeCodeCompat.enabled, true);
+  assert.deepEqual(nextAgentKitSetting(undefined, { editorChrome: false }), { editorChrome: false });
 });
 
 test("task completion notification status is derived from the final assistant result", () => {

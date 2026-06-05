@@ -1,11 +1,11 @@
 import type { ExtensionAPI, ExtensionContext, ReadonlyFooterDataProvider, Theme } from "@earendil-works/pi-coding-agent";
 
 import {
-  parseFooterFixedConfig,
+  parseAgentKitConfig,
   readSettings,
-  type FooterFixedBooleanSettingKey,
-  type FooterFixedConfig,
-  writeFooterFixedSetting,
+  type AgentKitBooleanSettingKey,
+  type AgentKitConfig,
+  writeAgentKitSetting,
 } from "./config.ts";
 import {
   formatFastHelp,
@@ -18,7 +18,7 @@ import {
   patchCodexCompatPayload,
 } from "./provider-compat.ts";
 import { getTaskCompletionNotificationAnswer, getTaskCompletionNotificationStatus, notifyTaskComplete, shouldNotifyTaskCompletion } from "./notify.ts";
-import { showFooterFixedSettingsPanel } from "./settings-panel.ts";
+import { showAgentKitSettingsPanel } from "./settings-panel.ts";
 import { createPluginState, resetPluginState, cleanupPluginState } from "./plugin-state.ts";
 import type { PluginState } from "./plugin-state.ts";
 import { notify, activeModel } from "./utils.ts";
@@ -46,9 +46,9 @@ import {
  * Pi Agent固定编辑器插件
  * 将编辑器固定在终端底部，同时提供快速模式、提供商兼容性等功能
  */
-export default function footerFixedPlugin(pi: ExtensionAPI) {
+export default function agentKitPlugin(pi: ExtensionAPI) {
   // 插件配置
-  let config: FooterFixedConfig = parseFooterFixedConfig({});
+  let config: AgentKitConfig = parseAgentKitConfig({});
 
   // 插件状态
   const state: PluginState = createPluginState();
@@ -114,14 +114,14 @@ export default function footerFixedPlugin(pi: ExtensionAPI) {
   /**
    * 应用设置
    */
-  function applySetting(ctx: any, key: FooterFixedBooleanSettingKey, value: boolean): void {
+  function applySetting(ctx: any, key: AgentKitBooleanSettingKey, value: boolean): void {
     if (key === "fast.enabled") {
       if (config.fast.enabled === value) return;
       config.fast.enabled = value;
       state.fastDesired = value;
       updateProviderStatuses(ctx, state.currentModelRef, state.fastDesired, config);
-      const persisted = writeFooterFixedSetting(ctx.cwd, { fast: { enabled: value } });
-      if (!persisted) notify(ctx, "pi-footer-fixed setting changed but was not persisted; check settings.json", "warning");
+      const persisted = writeAgentKitSetting(ctx.cwd, { fast: { enabled: value } });
+      if (!persisted) notify(ctx, "pi-agent-kit setting changed but was not persisted; check settings.json", "warning");
       return;
     }
 
@@ -138,16 +138,16 @@ export default function footerFixedPlugin(pi: ExtensionAPI) {
     if (key === "notificationChannels.windowsToast.enabled") {
       if (config.notificationChannels.windowsToast.enabled === value) return;
       config.notificationChannels.windowsToast.enabled = value;
-      const persisted = writeFooterFixedSetting(ctx.cwd, { notificationChannels: { windowsToast: { enabled: value } } });
-      if (!persisted) notify(ctx, "pi-footer-fixed setting changed but was not persisted; check settings.json", "warning");
+      const persisted = writeAgentKitSetting(ctx.cwd, { notificationChannels: { windowsToast: { enabled: value } } });
+      if (!persisted) notify(ctx, "pi-agent-kit setting changed but was not persisted; check settings.json", "warning");
       return;
     }
 
     if (key === "notificationChannels.telegram.enabled") {
       if (config.notificationChannels.telegram.enabled === value) return;
       config.notificationChannels.telegram.enabled = value;
-      const persisted = writeFooterFixedSetting(ctx.cwd, { notificationChannels: { telegram: { enabled: value } } });
-      if (!persisted) notify(ctx, "pi-footer-fixed setting changed but was not persisted; check settings.json", "warning");
+      const persisted = writeAgentKitSetting(ctx.cwd, { notificationChannels: { telegram: { enabled: value } } });
+      if (!persisted) notify(ctx, "pi-agent-kit setting changed but was not persisted; check settings.json", "warning");
       return;
     }
 
@@ -163,9 +163,9 @@ export default function footerFixedPlugin(pi: ExtensionAPI) {
       state.tuiRef?.requestRender?.();
     }
 
-    const persisted = writeFooterFixedSetting(ctx.cwd, { [key]: value });
+    const persisted = writeAgentKitSetting(ctx.cwd, { [key]: value });
     if (!persisted) {
-      notify(ctx, "pi-footer-fixed setting changed but was not persisted; check settings.json", "warning");
+      notify(ctx, "pi-agent-kit setting changed but was not persisted; check settings.json", "warning");
     }
   }
 
@@ -174,11 +174,11 @@ export default function footerFixedPlugin(pi: ExtensionAPI) {
    */
   async function openSettings(ctx: any): Promise<void> {
     if (!ctx.hasUI) {
-      notify(ctx, "pi-footer-fixed settings require interactive UI", "warning");
+      notify(ctx, "pi-agent-kit settings require interactive UI", "warning");
       return;
     }
 
-    await showFooterFixedSettingsPanel(ctx, config, (key, value) => applySetting(ctx, key, value));
+    await showAgentKitSettingsPanel(ctx, config, (key, value) => applySetting(ctx, key, value));
 
     if (state.needsFixedEditorReinstall) {
       reinstallFixedEditorBound(ctx);
@@ -190,7 +190,7 @@ export default function footerFixedPlugin(pi: ExtensionAPI) {
    */
   function reloadRuntimeConfig(ctx: any): void {
     const providerCompatDesired = config.providerCompat.enabled;
-    config = parseFooterFixedConfig(readSettings(ctx.cwd));
+    config = parseAgentKitConfig(readSettings(ctx.cwd));
     config.providerCompat.enabled = providerCompatDesired;
     config.claudeCodeCompat.enabled = providerCompatDesired;
     config.codexCompat.enabled = providerCompatDesired;
@@ -236,7 +236,7 @@ export default function footerFixedPlugin(pi: ExtensionAPI) {
     config.fast.enabled = state.fastDesired;
     updateProviderStatuses(ctx, state.currentModelRef, state.fastDesired, config);
     if (config.fast.persistState) {
-      const persisted = writeFooterFixedSetting(ctx.cwd, { fast: { enabled: state.fastDesired } });
+      const persisted = writeAgentKitSetting(ctx.cwd, { fast: { enabled: state.fastDesired } });
       if (!persisted) notify(ctx, "Fast mode changed but was not persisted; check settings.json", "warning");
     }
     notify(ctx, formatFastStatusMessage(state.fastDesired, activeModel(ctx, state.currentModelRef), config.fast.supportedModels, config.fast.serviceTier), "info");
@@ -279,7 +279,7 @@ export default function footerFixedPlugin(pi: ExtensionAPI) {
   });
 
   pi.on("session_start", async (_event, ctx: ExtensionContext) => {
-    config = parseFooterFixedConfig(readSettings(ctx.cwd));
+    config = parseAgentKitConfig(readSettings(ctx.cwd));
     resetPluginState(state);
     clearInstallTimers(state);
     state.activeCtxRef = ctx;
@@ -330,9 +330,9 @@ export default function footerFixedPlugin(pi: ExtensionAPI) {
   pi.on("session_shutdown", async (_event, ctx) => {
     clearInstallTimers(state);
     teardownFixedEditorCompositor(state, { resetExtendedKeyboardModes: true });
-    ctx?.ui?.setStatus?.("footer-fixed-fast", undefined);
-    ctx?.ui?.setStatus?.("footer-fixed-claude-code", undefined);
-    ctx?.ui?.setStatus?.("footer-fixed-codex", undefined);
+    ctx?.ui?.setStatus?.("agent-kit-fast", undefined);
+    ctx?.ui?.setStatus?.("agent-kit-claude-code", undefined);
+    ctx?.ui?.setStatus?.("agent-kit-codex", undefined);
     for (const [provider, previousConfig] of state.previousCompatProviderConfigs.entries()) {
       writeProviderRequestConfig(pi, ctx, provider, previousConfig);
     }
@@ -340,12 +340,14 @@ export default function footerFixedPlugin(pi: ExtensionAPI) {
   });
 
   // 注册命令
-  pi.registerCommand("footer-fixed", {
-    description: "Open pi-footer-fixed settings",
-    handler: async (_args, ctx) => {
+  const settingsCommand = {
+    description: "Open pi-agent-kit settings",
+    handler: async (_args: string | string[], ctx: any) => {
       await openSettings(ctx);
     },
-  });
+  };
+
+  pi.registerCommand("agent-kit", settingsCommand);
 
   pi.registerCommand("fast", {
     description: "Toggle OpenAI priority fast mode for allow-listed custom provider models",

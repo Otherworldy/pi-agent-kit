@@ -1,48 +1,24 @@
-# pi-footer-fixed
+# pi-agent-kit
 
-Pi Agent extension that keeps the editor/input cluster fixed at the bottom of the terminal while chat output scrolls above it.
+Pi Agent terminal productivity kit with a fixed editor/input cluster, editor chrome, task completion notifications, fast mode, and provider compatibility helpers.
 
-Based on the Fixed editor cluster idea from [`nicobailon/pi-powerline-footer`](https://github.com/nicobailon/pi-powerline-footer).
+Based on the fixed editor cluster idea from [`nicobailon/pi-powerline-footer`](https://github.com/nicobailon/pi-powerline-footer).
 
 ## Install
 
 ```bash
 npm install
 npm run validate
-pi install -l D:/Study/Code/Node/pi-footer-fixed
+pi install -l D:/Study/Code/Node/pi-agent-kit
 ```
-
-## Task completion notification
-
-On native Windows, and on Windows 11 WSL with `powershell.exe`/WSL interop available, the extension can send a local toast notification when the main interactive Pi Agent finishes a task. Telegram push can also be enabled as an additional notification channel. Successful tasks send the final assistant answer, errors send a fixed failure message, and user-aborted tasks do not send a notification.
-
-Subagent processes are skipped via the `PI_SUBAGENT_*` environment markers used by `pi-subagents`, with a JSON print-mode fallback guard. Local and Telegram notifications can be enabled separately in `/footer-fixed`. If no toast appears in WSL, check `command -v powershell.exe` and Windows notification / Do Not Disturb settings.
-
-To enable Telegram, create a bot with `@BotFather`, send it `/start`, and configure the bot token and chat id in settings:
-
-```json
-{
-  "footerFixed": {
-    "notificationChannels": {
-      "telegram": {
-        "enabled": true,
-        "botToken": "123456:example",
-        "chatId": "123456789"
-      }
-    }
-  }
-}
-```
-
-You can also set `apiBaseUrl` and `timeoutMs` under `notificationChannels.telegram`.
 
 ## Settings UI
 
 ```text
-/footer-fixed
+/agent-kit
 ```
 
-Opens a settings panel with:
+The settings panel includes:
 
 - Fixed editor
 - Mouse scroll
@@ -50,6 +26,7 @@ Opens a settings panel with:
 - Editor chrome
 - Local task notification
 - Telegram task notification
+- Provider compatibility
 - Fast mode
 
 ## Settings file
@@ -60,7 +37,7 @@ Project: `.pi/settings.json`
 
 ```json
 {
-  "footerFixed": {
+  "agentKit": {
     "fixedEditor": true,
     "mouseScroll": true,
     "showExtensionStatus": true,
@@ -77,6 +54,9 @@ Project: `.pi/settings.json`
       }
     },
     "editorChrome": true,
+    "providerCompat": {
+      "enabled": true
+    },
     "fast": {
       "enabled": false,
       "persistState": true,
@@ -93,7 +73,35 @@ Project: `.pi/settings.json`
 }
 ```
 
-`editorChrome` shows the current model, thinking level, working directory, git branch, and git change summary directly on the input box border, inspired by `amp-themes`.
+`powerline.fixedEditor` and `powerline.mouseScroll` are also read as compatibility aliases.
+
+## Fixed editor and editor chrome
+
+The fixed editor keeps the input cluster at the bottom of the terminal while chat output scrolls above it. `editorChrome` shows the current model, thinking level, working directory, git branch, git change summary, provider compatibility label, fast mode label, and context usage directly on the input box border, inspired by `amp-themes`.
+
+## Task completion notification
+
+On native Windows, and on Windows 11 WSL with `powershell.exe`/WSL interop available, the extension can send a local toast notification when the main interactive Pi Agent finishes a task. Telegram push can also be enabled as an additional notification channel. Successful tasks send the final assistant answer, errors send a fixed failure message, and user-aborted tasks do not send a notification.
+
+Subagent processes are skipped via the `PI_SUBAGENT_*` environment markers used by `pi-subagents`, with a JSON print-mode fallback guard. Local and Telegram notifications can be enabled separately in `/agent-kit`. If no toast appears in WSL, check `command -v powershell.exe` and Windows notification / Do Not Disturb settings.
+
+To enable Telegram, create a bot with `@BotFather`, send it `/start`, and configure the bot token and chat id in settings:
+
+```json
+{
+  "agentKit": {
+    "notificationChannels": {
+      "telegram": {
+        "enabled": true,
+        "botToken": "123456:example",
+        "chatId": "123456789"
+      }
+    }
+  }
+}
+```
+
+You can also set `apiBaseUrl` and `timeoutMs` under `notificationChannels.telegram`.
 
 ## Fast mode
 
@@ -102,19 +110,19 @@ Project: `.pi/settings.json`
 pi --fast
 ```
 
-Fast mode follows `pi-better-openai`: it does not register a provider. Instead, when enabled and the current model key is in `footerFixed.fast.supportedModels`, it patches the final provider payload with `service_tier: "priority"` in Pi's `before_provider_request` hook.
+Fast mode follows `pi-better-openai`: it does not register a provider. Instead, when enabled and the current model key is in `agentKit.fast.supportedModels`, it patches the final provider payload with `service_tier: "priority"` in Pi's `before_provider_request` hook.
 
 For a Pi custom provider, keep your provider registration as-is, then add its `provider/modelId` key to `supportedModels`, for example `"my-openai/gpt-5.5"`. The upstream OpenAI-compatible endpoint/proxy must accept the `service_tier` field.
 
 ## Provider compatibility
 
-Some Claude/NewAPI-compatible gateways validate that requests look like Claude Code CLI, and QuantumNous/new-api also includes Codex CLI channel-affinity/header passthrough templates. Provider compatibility is enabled by default; toggle `Provider compatibility` in `/footer-fixed` if you want to restore normal provider requests for the current session. When active, the editor chrome shows `CC` or `Codex` next to the thinking level.
+Some Claude/NewAPI-compatible gateways validate that requests look like Claude Code CLI, and QuantumNous/new-api also includes Codex CLI channel-affinity/header passthrough templates. Provider compatibility is enabled by default; toggle `Provider compatibility` in `/agent-kit` if you want to restore normal provider requests for the current session. When active, the editor chrome shows `CC` or `Codex` next to the thinking level.
 
 `settings.json` only needs the headers you want to override; all omitted headers use built-in Claude Code or Codex CLI defaults:
 
 ```json
 {
-  "footerFixed": {
+  "agentKit": {
     "providerCompat": {
       "claudeCodeHeaders": {
         "User-Agent": "claude-cli/2.1.75 (external, cli)"
@@ -134,7 +142,7 @@ Nested header config is also accepted if you prefer grouping by profile:
 
 ```json
 {
-  "footerFixed": {
+  "agentKit": {
     "providerCompat": {
       "claudeCode": {
         "headers": {
@@ -150,8 +158,6 @@ Nested header config is also accepted if you prefer grouping by profile:
   }
 }
 ```
-
-`powerline.fixedEditor` and `powerline.mouseScroll` are also read as compatibility aliases.
 
 ## Notes
 

@@ -1,12 +1,12 @@
 import { Container, SettingsList, truncateToWidth, visibleWidth, type Component } from "@earendil-works/pi-tui";
 import { getSettingsListTheme, type Theme } from "@earendil-works/pi-coding-agent";
 
-import type { FooterFixedBooleanSettingKey, FooterFixedConfig } from "./config.ts";
+import type { AgentKitBooleanSettingKey, AgentKitConfig } from "./config.ts";
 
-export interface FooterFixedSettingsPanelOptions {
-  config: FooterFixedConfig;
+export interface AgentKitSettingsPanelOptions {
+  config: AgentKitConfig;
   borderColor: (text: string) => string;
-  onChange: (key: FooterFixedBooleanSettingKey, value: boolean) => void;
+  onChange: (key: AgentKitBooleanSettingKey, value: boolean) => void;
   onCancel: () => void;
 }
 
@@ -42,10 +42,10 @@ class BorderedPanel implements Component {
   }
 }
 
-export class FooterFixedSettingsPanel extends Container {
+export class AgentKitSettingsPanel extends Container {
   private readonly settingsList: SettingsList;
 
-  constructor(options: FooterFixedSettingsPanelOptions) {
+  constructor(options: AgentKitSettingsPanelOptions) {
     super();
 
     const items = [
@@ -111,7 +111,7 @@ export class FooterFixedSettingsPanel extends Container {
       items,
       items.length,
       getSettingsListTheme(),
-      (id, newValue) => options.onChange(id as FooterFixedBooleanSettingKey, newValue === "true"),
+      (id, newValue) => options.onChange(id as AgentKitBooleanSettingKey, newValue === "true"),
       options.onCancel,
     );
     this.addChild(new BorderedPanel(this.settingsList, options.borderColor));
@@ -126,13 +126,13 @@ export class FooterFixedSettingsPanel extends Container {
   }
 }
 
-export function showFooterFixedSettingsPanel(
+export function showAgentKitSettingsPanel(
   ctx: any,
-  config: FooterFixedConfig,
-  onChange: (key: FooterFixedBooleanSettingKey, value: boolean) => void,
+  config: AgentKitConfig,
+  onChange: (key: AgentKitBooleanSettingKey, value: boolean) => void,
 ): Promise<void> {
   return ctx.ui.custom((_tui: any, theme: Theme, _keybindings: any, done: () => void) => {
-    const panel = new FooterFixedSettingsPanel({
+    const panel = new AgentKitSettingsPanel({
       config,
       borderColor: (text) => theme.fg("border", text),
       onChange,

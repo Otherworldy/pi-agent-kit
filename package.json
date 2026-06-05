@@ -1,7 +1,7 @@
 {
-  "name": "pi-footer-fixed",
+  "name": "pi-agent-kit",
   "version": "0.1.0",
-  "description": "Keep the Pi Agent editor cluster fixed at the bottom of the terminal.",
+  "description": "Pi Agent terminal productivity kit with a fixed editor, status chrome, notifications, fast mode, and provider compatibility.",
   "type": "module",
   "files": [
     "src/**/*.ts",
@@ -14,7 +14,11 @@
     "pi-coding-agent",
     "extension",
     "tui",
-    "fixed-editor"
+    "fixed-editor",
+    "agent-kit",
+    "notifications",
+    "fast-mode",
+    "provider-compat"
   ],
   "license": "MIT",
   "scripts": {

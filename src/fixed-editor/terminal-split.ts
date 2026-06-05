@@ -381,7 +381,7 @@ export class TerminalSplitCompositor {
   install(): void {
     if (this.installed) return;
     if (typeof this.terminal.write !== "function") {
-      throw new Error("[pi-footer-fixed] Fixed editor compositor expected terminal.write(data) to exist");
+      throw new Error("[pi-agent-kit] Fixed editor compositor expected terminal.write(data) to exist");
     }
 
     this.originalWrite(

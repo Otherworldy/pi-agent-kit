@@ -1,5 +1,5 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import type { FooterFixedConfig } from "./config.ts";
+import type { AgentKitConfig } from "./config.ts";
 import type { ProviderRequestConfig } from "./plugin-state.ts";
 import { getClaudeCodeCompatProviderNames, getCodexCompatHeaders, getCodexCompatProviderNames } from "./provider-compat.ts";
 import { notify, activeModel } from "./utils.ts";
@@ -37,7 +37,7 @@ export function writeProviderRequestConfig(
       headers: requestConfig?.headers ?? {},
     });
   } catch (error) {
-    console.debug(`[pi-footer-fixed] Failed to update provider compat config for ${provider}:`, error);
+    console.debug(`[pi-agent-kit] Failed to update provider compat config for ${provider}:`, error);
     notify(ctx, `Provider compatibility update failed for ${provider}`, "warning");
   }
 }
@@ -66,7 +66,7 @@ export function registerProviderCompatProviders(
   pi: ExtensionAPI,
   ctx: any | undefined,
   currentModelRef: any,
-  config: FooterFixedConfig,
+  config: AgentKitConfig,
   previousCompatProviderConfigs: Map<string, ProviderRequestConfig | null>,
 ): {
   claudeProviders: Set<string>;

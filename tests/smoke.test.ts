@@ -5,7 +5,7 @@ import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { initTheme } from "@earendil-works/pi-coding-agent";
-import footerFixedPlugin from "../src/index.ts";
+import agentKitPlugin from "../src/index.ts";
 
 // 增加EventEmitter监听器限制，避免测试中的警告
 process.setMaxListeners(20);
@@ -39,14 +39,14 @@ function createFooterData(statuses: Map<string, string>) {
 const editorTheme = { borderColor: (text: string) => text, selectList: {} };
 
 function createTempSettings() {
-  const root = mkdtempSync(join(tmpdir(), "pi-footer-fixed-"));
+  const root = mkdtempSync(join(tmpdir(), "pi-agent-kit-"));
   const home = join(root, "home");
   const cwd = join(root, "project");
   mkdirSync(join(cwd, ".pi"), { recursive: true });
   mkdirSync(home, { recursive: true });
   execFileSync("git", ["init", "-b", "main"], { cwd, stdio: "ignore" });
   writeFileSync(join(cwd, ".pi", "settings.json"), JSON.stringify({
-    footerFixed: {
+    agentKit: {
       fixedEditor: true,
       mouseScroll: true,
       showExtensionStatus: true,
@@ -204,7 +204,7 @@ function createHarness(cwd: string, options: { synchronousEditorComponent?: bool
     },
     registerCommand(name: string, command: { handler: (args: string, ctx: any) => void | Promise<void> }) {
       commands.set(name, command.handler);
-      if (name === "footer-fixed") commandHandler = command.handler;
+      if (name === "agent-kit") commandHandler = command.handler;
     },
     registerFlag(name: string, options: { default?: boolean | string }) {
       if (options.default !== undefined && !flags.has(name)) flags.set(name, options.default);
@@ -223,7 +223,7 @@ function createHarness(cwd: string, options: { synchronousEditorComponent?: bool
     },
   };
 
-  footerFixedPlugin(api as never);
+  agentKitPlugin(api as never);
 
   const ctx = {
     hasUI: true,
@@ -323,8 +323,8 @@ test("plugin exports a default factory and registers lifecycle hooks plus comman
     },
   };
 
-  assert.equal(typeof footerFixedPlugin, "function");
-  footerFixedPlugin(api as never);
+  assert.equal(typeof agentKitPlugin, "function");
+  agentKitPlugin(api as never);
 
   assert.deepEqual(events, [
     "before_provider_request",
@@ -335,7 +335,7 @@ test("plugin exports a default factory and registers lifecycle hooks plus comman
     "agent_end",
     "session_shutdown",
   ]);
-  assert.deepEqual(commands, ["footer-fixed", "fast"]);
+  assert.deepEqual(commands, ["agent-kit", "fast"]);
   assert.deepEqual(flags, ["fast"]);
 });
 
@@ -437,12 +437,12 @@ test("settings overlay persists local and Telegram notification toggles", async 
     await promise;
 
     const settings = JSON.parse(readFileSync(join(cwd, ".pi", "settings.json"), "utf-8"));
-    assert.equal(settings.footerFixed.notificationChannels.windowsToast.enabled, false);
-    assert.equal(settings.footerFixed.notificationChannels.telegram.enabled, true);
+    assert.equal(settings.agentKit.notificationChannels.windowsToast.enabled, false);
+    assert.equal(settings.agentKit.notificationChannels.telegram.enabled, true);
   });
 });
 
-test("settings toggles do not wrap pi-footer-fixed editor factory repeatedly", async () => {
+test("settings toggles do not wrap pi-agent-kit editor factory repeatedly", async () => {
   await withTempSettings(async ({ cwd }) => {
     const harness = createHarness(cwd);
     assert.ok(harness.sessionStart);
@@ -517,7 +517,7 @@ test("settings overlay persists editor chrome toggle", async () => {
     await promise;
 
     const settings = JSON.parse(readFileSync(join(cwd, ".pi", "settings.json"), "utf-8"));
-    assert.equal(settings.footerFixed.editorChrome, false);
+    assert.equal(settings.agentKit.editorChrome, false);
   });
 });
 
@@ -525,7 +525,7 @@ test("fast command toggles status, editor chrome label, and provider payload", a
   await withTempSettings(async ({ cwd }) => {
     const settingsPath = join(cwd, ".pi", "settings.json");
     const settingsBefore = JSON.parse(readFileSync(settingsPath, "utf-8"));
-    delete settingsBefore.footerFixed.providerCompat;
+    delete settingsBefore.agentKit.providerCompat;
     writeFileSync(settingsPath, JSON.stringify(settingsBefore), "utf-8");
 
     const harness = createHarness(cwd, { synchronousEditorComponent: true, synchronousFooter: true });
@@ -540,7 +540,7 @@ test("fast command toggles status, editor chrome label, and provider payload", a
     assert.equal(await harness.emit("before_provider_request", { payload: { model: "gpt-5.5" } }), undefined);
     await harness.runCommand("fast", "on");
 
-    assert.equal(harness.statuses.get("footer-fixed-fast"), "⚡fast");
+    assert.equal(harness.statuses.get("agent-kit-fast"), "⚡fast");
     assert.ok(harness.mountedEditor.render(120)[0]?.includes("⚡fast"));
     assert.deepEqual(await harness.emit("before_provider_request", { payload: { model: "gpt-5.5" } }), {
       model: "gpt-5.5",
@@ -548,7 +548,7 @@ test("fast command toggles status, editor chrome label, and provider payload", a
     });
 
     const settings = JSON.parse(readFileSync(settingsPath, "utf-8"));
-    assert.equal(settings.footerFixed.fast.enabled, true);
+    assert.equal(settings.agentKit.fast.enabled, true);
   });
 });
 
@@ -560,13 +560,13 @@ test("provider compat switch auto-registers Claude Code headers and patches Clau
     await harness.sessionStart({ reason: "new" }, harness.ctx);
 
     const settings = JSON.parse(readFileSync(join(cwd, ".pi", "settings.json"), "utf-8"));
-    assert.equal(settings.footerFixed.providerCompat.enabled, undefined);
+    assert.equal(settings.agentKit.providerCompat.enabled, undefined);
     const providerConfig = harness.providerRegistrations.get("my-claude") as { headers: Record<string, string> };
     assert.equal(providerConfig.headers["User-Agent"], "claude-cli/test");
     assert.equal(providerConfig.headers["X-App"], "cli");
     assert.equal(providerConfig.headers["Anthropic-Version"], "2023-06-01");
     assert.equal(providerConfig.headers["Anthropic-Beta"], "claude-code-20250219,interleaved-thinking-2025-05-14");
-    assert.equal(harness.statuses.get("footer-fixed-claude-code"), "CC compat");
+    assert.equal(harness.statuses.get("agent-kit-claude-code"), "CC compat");
     assert.deepEqual(await harness.emit("before_provider_request", {
       payload: {
         model: "claude-sonnet-4-5",
@@ -602,7 +602,7 @@ test("provider compat switch auto-registers Codex headers and patches responses 
     assert.equal(providerConfig.headers.Session_id, "pi-agent");
     const sessionMetadata = readTurnMetadata();
     assert.equal(sessionMetadata.model, "gpt-5.5");
-    assert.equal(harness.statuses.get("footer-fixed-codex"), "Codex compat");
+    assert.equal(harness.statuses.get("agent-kit-codex"), "Codex compat");
 
     await harness.emit("turn_start", { turnIndex: 0, timestamp: Date.now() });
     const firstTurnMetadata = readTurnMetadata();

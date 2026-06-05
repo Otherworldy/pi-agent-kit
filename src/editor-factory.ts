@@ -1,7 +1,7 @@
 import { CustomEditor } from "@earendil-works/pi-coding-agent";
-import type { PluginState, EditorFactory, FooterFixedEditorFactory } from "./plugin-state.ts";
-import type { FooterFixedConfig } from "./config.ts";
-import { FOOTER_FIXED_EDITOR_FACTORY } from "./plugin-state.ts";
+import type { PluginState, EditorFactory, AgentKitEditorFactory } from "./plugin-state.ts";
+import type { AgentKitConfig } from "./config.ts";
+import { AGENT_KIT_EDITOR_FACTORY } from "./plugin-state.ts";
 import { renderEditorChrome } from "./editor-chrome.ts";
 import { getFastChromeLabel, getProviderCompatChromeLabel } from "./status-updater.ts";
 import { findContainerWithChild } from "./utils.ts";
@@ -12,10 +12,10 @@ import { findContainerWithChild } from "./utils.ts";
 export function wrapEditorFactory(
   ctx: any,
   state: PluginState,
-  config: FooterFixedConfig,
+  config: AgentKitConfig,
   factory: EditorFactory | undefined,
   installWhenTuiReady: (ctx: any, tui: any) => void,
-): FooterFixedEditorFactory {
+): AgentKitEditorFactory {
   const wrapped = ((tui: any, theme: any, keybindings: any) => {
     const editor = factory
       ? factory(tui, theme, keybindings)
@@ -57,9 +57,9 @@ export function wrapEditorFactory(
     }
 
     return editor;
-  }) as FooterFixedEditorFactory;
+  }) as AgentKitEditorFactory;
 
-  wrapped[FOOTER_FIXED_EDITOR_FACTORY] = true;
+  wrapped[AGENT_KIT_EDITOR_FACTORY] = true;
   return wrapped;
 }
 
@@ -76,11 +76,11 @@ export function isCurrentEditorMounted(state: PluginState): boolean {
 export function ensureEditorFactoryInstalled(
   ctx: any,
   state: PluginState,
-  config: FooterFixedConfig,
+  config: AgentKitConfig,
   installWhenTuiReady: (ctx: any, tui: any) => void,
 ): void {
-  const existingFactory = ctx.ui.getEditorComponent?.() as FooterFixedEditorFactory | undefined;
-  if (existingFactory !== undefined && existingFactory[FOOTER_FIXED_EDITOR_FACTORY] !== true) {
+  const existingFactory = ctx.ui.getEditorComponent?.() as AgentKitEditorFactory | undefined;
+  if (existingFactory !== undefined && existingFactory[AGENT_KIT_EDITOR_FACTORY] !== true) {
     state.originalEditorFactory = existingFactory;
     state.wrappedEditorFactory = undefined;
   }

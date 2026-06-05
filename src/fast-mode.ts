@@ -92,13 +92,13 @@ export function formatFastStatusMessage(
   if (supportsFast(model, supportedModels)) {
     return `Fast mode is on for ${key}; provider payloads will request service_tier=${serviceTier || "priority"}.`;
   }
-  return `Fast mode is requested, but ${key} is not in footerFixed.fast.supportedModels.`;
+  return `Fast mode is requested, but ${key} is not in agentKit.fast.supportedModels.`;
 }
 
 export function formatFastHelp(): string {
   return [
     "Usage: /fast [on|off|status|reload|help]",
     "Adds service_tier=priority to provider payloads for allow-listed OpenAI-compatible models.",
-    "For custom providers, add provider/modelId to footerFixed.fast.supportedModels.",
+    "For custom providers, add provider/modelId to agentKit.fast.supportedModels.",
   ].join("\n");
 }

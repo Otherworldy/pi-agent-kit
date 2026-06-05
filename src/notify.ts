@@ -281,13 +281,13 @@ export async function notifyTaskCompleteTelegram(
 
     if (!response.ok) {
       const responseBody = await response.text().catch(() => "");
-      console.debug(`[pi-footer-fixed] Telegram notification failed with status ${response.status}: ${responseBody}`);
+      console.debug(`[pi-agent-kit] Telegram notification failed with status ${response.status}: ${responseBody}`);
       return false;
     }
 
     return true;
   } catch (error) {
-    console.debug("[pi-footer-fixed] Telegram notification failed:", error);
+    console.debug("[pi-agent-kit] Telegram notification failed:", error);
     return false;
   } finally {
     clearTimeout(timeout);

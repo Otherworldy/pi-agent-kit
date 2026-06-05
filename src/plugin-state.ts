@@ -1,6 +1,6 @@
 import type { ExtensionContext, ReadonlyFooterDataProvider } from "@earendil-works/pi-coding-agent";
 import type { TerminalSplitCompositor } from "./fixed-editor/terminal-split.ts";
-import type { FooterFixedConfig } from "./config.ts";
+import type { AgentKitConfig } from "./config.ts";
 
 /**
  * 插件状态管理
@@ -15,7 +15,7 @@ export interface PluginState {
 
   // 编辑器工厂
   originalEditorFactory: EditorFactory | undefined;
-  wrappedEditorFactory: FooterFixedEditorFactory | undefined;
+  wrappedEditorFactory: AgentKitEditorFactory | undefined;
 
   // Compositor状态
   fixedEditorCompositor: TerminalSplitCompositor | null;
@@ -43,9 +43,9 @@ export interface PluginState {
 }
 
 export type EditorFactory = (tui: any, theme: any, keybindings: any) => any;
-export type FooterFixedEditorFactory = EditorFactory & { [FOOTER_FIXED_EDITOR_FACTORY]?: true };
+export type AgentKitEditorFactory = EditorFactory & { [AGENT_KIT_EDITOR_FACTORY]?: true };
 
-export const FOOTER_FIXED_EDITOR_FACTORY = Symbol("pi-footer-fixed.editorFactory");
+export const AGENT_KIT_EDITOR_FACTORY = Symbol("pi-agent-kit.editorFactory");
 
 export interface ProviderRequestConfig {
   apiKey?: string;

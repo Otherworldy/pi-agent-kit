@@ -1,5 +1,5 @@
 import type { PluginState } from "./plugin-state.ts";
-import type { FooterFixedConfig } from "./config.ts";
+import type { AgentKitConfig } from "./config.ts";
 import { TerminalSplitCompositor, emergencyTerminalModeReset } from "./fixed-editor/terminal-split.ts";
 import { renderFixedEditorCluster } from "./fixed-editor/cluster.ts";
 import { visibleWidth } from "@earendil-works/pi-tui";
@@ -13,8 +13,8 @@ import {
 } from "./utils.ts";
 import { ensureEditorFactoryInstalled } from "./editor-factory.ts";
 
-export const STATUS_WIDGET_ID = "footer-fixed-status";
-export const SECONDARY_WIDGET_ID = "footer-fixed-secondary";
+export const STATUS_WIDGET_ID = "agent-kit-status";
+export const SECONDARY_WIDGET_ID = "agent-kit-secondary";
 export const DEFAULT_SCROLL_UP_SHORTCUT = "super+up";
 export const DEFAULT_SCROLL_DOWN_SHORTCUT = "super+down";
 export const MAX_INSTALL_RETRY_ATTEMPTS = 5;
@@ -51,13 +51,13 @@ export function installFixedEditorCompositor(
   ctx: any,
   tui: any,
   state: PluginState,
-  config: FooterFixedConfig,
+  config: AgentKitConfig,
   queueInstallRetry: (ctx: any) => void,
 ): boolean {
   if (!ctx?.hasUI || !config.fixedEditor) return false;
   if (!tui?.terminal || typeof tui.terminal.write !== "function") {
     teardownFixedEditorCompositor(state);
-    throw new Error("[pi-footer-fixed] Fixed editor compositor could not find tui.terminal.write()");
+    throw new Error("[pi-agent-kit] Fixed editor compositor could not find tui.terminal.write()");
   }
   if (!state.currentEditor) return false;
 
@@ -132,7 +132,7 @@ export function installFixedEditorCompositor(
 /**
  * 安装回退小部件（当固定编辑器不可用时）
  */
-export function installFallbackWidgets(ctx: any, state: PluginState, config: FooterFixedConfig): void {
+export function installFallbackWidgets(ctx: any, state: PluginState, config: AgentKitConfig): void {
   ctx.ui.setWidget(STATUS_WIDGET_ID, () => ({
     dispose() {},
     invalidate() {},
@@ -208,7 +208,7 @@ export function installWhenTuiReady(
   ctx: any,
   tui: any,
   state: PluginState,
-  config: FooterFixedConfig,
+  config: AgentKitConfig,
   queueInstallRetryFn: (ctx: any) => void,
 ): void {
   queueMicrotask(() => {
@@ -225,8 +225,8 @@ export function installWhenTuiReady(
         queueInstallRetryFn(ctx);
       }
     } catch (error) {
-      console.debug("[pi-footer-fixed] Fixed editor install failed:", error);
-      notify(ctx, "pi-footer-fixed: fixed editor install failed; using normal widgets", "warning");
+      console.debug("[pi-agent-kit] Fixed editor install failed:", error);
+      notify(ctx, "pi-agent-kit: fixed editor install failed; using normal widgets", "warning");
       teardownFixedEditorCompositor(state);
       installFallbackWidgets(ctx, state, config);
     }
@@ -239,7 +239,7 @@ export function installWhenTuiReady(
 export function reinstallFixedEditor(
   ctx: any,
   state: PluginState,
-  config: FooterFixedConfig,
+  config: AgentKitConfig,
   installWhenTuiReadyFn: (ctx: any, tui: any) => void,
   ensureEditorFactoryInstalledFn: (ctx: any) => void,
   queueInstallRetryFn: (ctx: any) => void,
@@ -285,7 +285,7 @@ export function reinstallFixedEditor(
 export function setupEditor(
   ctx: any,
   state: PluginState,
-  config: FooterFixedConfig,
+  config: AgentKitConfig,
   ensureEditorFactoryInstalledFn: (ctx: any) => void,
   reinstallFixedEditorFn: (ctx: any, options?: { force?: boolean }) => void,
 ): void {

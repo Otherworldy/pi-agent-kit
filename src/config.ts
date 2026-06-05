@@ -47,7 +47,7 @@ export interface ProviderCompatSwitchConfig {
   codexHeaders: Record<string, string>;
 }
 
-export interface FooterFixedConfig {
+export interface AgentKitConfig {
   fixedEditor: boolean;
   mouseScroll: boolean;
   showExtensionStatus: boolean;
@@ -60,7 +60,7 @@ export interface FooterFixedConfig {
   codexCompat: CodexCompatConfig;
 }
 
-export type FooterFixedBooleanSettingKey =
+export type AgentKitBooleanSettingKey =
   | "fixedEditor"
   | "mouseScroll"
   | "showExtensionStatus"
@@ -71,7 +71,7 @@ export type FooterFixedBooleanSettingKey =
   | "providerCompat"
   | "fast.enabled";
 
-export type FooterFixedConfigUpdates = Partial<Omit<FooterFixedConfig, "fast" | "notificationChannels" | "providerCompat" | "claudeCodeCompat" | "codexCompat">> & {
+export type AgentKitConfigUpdates = Partial<Omit<AgentKitConfig, "fast" | "notificationChannels" | "providerCompat" | "claudeCodeCompat" | "codexCompat">> & {
   fast?: Partial<FastModeConfig>;
   notificationChannels?: {
     windowsToast?: Partial<WindowsToastNotificationChannelConfig>;
@@ -81,6 +81,8 @@ export type FooterFixedConfigUpdates = Partial<Omit<FooterFixedConfig, "fast" | 
   claudeCodeCompat?: Partial<ProviderCompatConfig>;
   codexCompat?: Partial<CodexCompatConfig>;
 };
+
+const AGENT_KIT_SETTINGS_KEY = "agentKit";
 
 export const DEFAULT_FAST_SUPPORTED_MODELS = [
   "openai/gpt-5.4",
@@ -117,7 +119,7 @@ export const DEFAULT_CODEX_COMPAT_HEADERS = {
 
 export const DEFAULT_CODEX_SYSTEM_TEXT = "You are Codex CLI, OpenAI's official coding agent.";
 
-const DEFAULT_CONFIG: FooterFixedConfig = {
+const DEFAULT_CONFIG: AgentKitConfig = {
   fixedEditor: true,
   mouseScroll: true,
   showExtensionStatus: true,
@@ -198,13 +200,13 @@ function readSettingsFile(settingsPath: string): Record<string, unknown> {
 
     const parsed = JSON.parse(readFileSync(settingsPath, "utf-8"));
     if (!isRecord(parsed)) {
-      console.debug(`[pi-footer-fixed] Ignoring non-object settings at ${settingsPath}`);
+      console.debug(`[pi-agent-kit] Ignoring non-object settings at ${settingsPath}`);
       return {};
     }
 
     return parsed;
   } catch (error) {
-    console.debug(`[pi-footer-fixed] Failed to read settings from ${settingsPath}:`, error);
+    console.debug(`[pi-agent-kit] Failed to read settings from ${settingsPath}:`, error);
     return {};
   }
 }
@@ -215,12 +217,12 @@ function readWritableSettingsFile(settingsPath: string): Record<string, unknown>
   try {
     const parsed = JSON.parse(readFileSync(settingsPath, "utf-8"));
     if (!isRecord(parsed)) {
-      console.debug(`[pi-footer-fixed] Refusing to write settings to non-object file at ${settingsPath}`);
+      console.debug(`[pi-agent-kit] Refusing to write settings to non-object file at ${settingsPath}`);
       return null;
     }
     return parsed;
   } catch (error) {
-    console.debug(`[pi-footer-fixed] Failed to parse settings at ${settingsPath}:`, error);
+    console.debug(`[pi-agent-kit] Failed to parse settings at ${settingsPath}:`, error);
     return null;
   }
 }
@@ -296,12 +298,12 @@ function nestedHeaderRecordFromObject(
   return stringRecordFromObject(nestedConfig, "headers", directHeaders);
 }
 
-function parseFastConfig(footerFixed: unknown): FastModeConfig {
-  const fast = isRecord(footerFixed) ? footerFixed.fast : undefined;
+function parseFastConfig(agentKit: unknown): FastModeConfig {
+  const fast = isRecord(agentKit) ? agentKit.fast : undefined;
 
   return {
     enabled: boolFromObject(fast, "enabled")
-      ?? boolFromObject(footerFixed, "fastMode")
+      ?? boolFromObject(agentKit, "fastMode")
       ?? DEFAULT_CONFIG.fast.enabled,
     persistState: boolFromObject(fast, "persistState") ?? DEFAULT_CONFIG.fast.persistState,
     serviceTier: stringFromObject(fast, "serviceTier", DEFAULT_CONFIG.fast.serviceTier),
@@ -309,19 +311,19 @@ function parseFastConfig(footerFixed: unknown): FastModeConfig {
   };
 }
 
-function parseNotificationChannelsConfig(footerFixed: unknown): NotificationChannelsConfig {
-  const channels = isRecord(footerFixed) ? footerFixed.notificationChannels : undefined;
+function parseNotificationChannelsConfig(agentKit: unknown): NotificationChannelsConfig {
+  const channels = isRecord(agentKit) ? agentKit.notificationChannels : undefined;
   const windowsToast = isRecord(channels) ? channels.windowsToast : undefined;
   const telegram = isRecord(channels) && isRecord(channels.telegram)
     ? channels.telegram
-    : isRecord(footerFixed)
-      ? footerFixed.telegramNotification
+    : isRecord(agentKit)
+      ? agentKit.telegramNotification
       : undefined;
 
   return {
     windowsToast: {
       enabled: boolFromObject(windowsToast, "enabled")
-        ?? boolFromObject(footerFixed, "taskCompletionNotification")
+        ?? boolFromObject(agentKit, "taskCompletionNotification")
         ?? DEFAULT_CONFIG.notificationChannels.windowsToast.enabled,
     },
     telegram: {
@@ -334,8 +336,8 @@ function parseNotificationChannelsConfig(footerFixed: unknown): NotificationChan
   };
 }
 
-function parseProviderCompatSwitchConfig(footerFixed: unknown): ProviderCompatSwitchConfig {
-  const providerCompat = isRecord(footerFixed) ? footerFixed.providerCompat : undefined;
+function parseProviderCompatSwitchConfig(agentKit: unknown): ProviderCompatSwitchConfig {
+  const providerCompat = isRecord(agentKit) ? agentKit.providerCompat : undefined;
 
   return {
     enabled: DEFAULT_CONFIG.providerCompat.enabled,
@@ -355,12 +357,12 @@ function parseProviderCompatSwitchConfig(footerFixed: unknown): ProviderCompatSw
 }
 
 function parseProviderCompatConfig(
-  footerFixed: unknown,
+  agentKit: unknown,
   key: "claudeCodeCompat" | "codexCompat",
   enabled: boolean,
   headers: Record<string, string>,
 ): ProviderCompatConfig {
-  const rawConfig = isRecord(footerFixed) ? footerFixed[key] : undefined;
+  const rawConfig = isRecord(agentKit) ? agentKit[key] : undefined;
   const defaults = DEFAULT_CONFIG[key];
 
   return {
@@ -375,12 +377,12 @@ function parseProviderCompatConfig(
 }
 
 function parseCodexCompatConfig(
-  footerFixed: unknown,
+  agentKit: unknown,
   enabled: boolean,
   headers: Record<string, string>,
 ): CodexCompatConfig {
-  const base = parseProviderCompatConfig(footerFixed, "codexCompat", enabled, headers);
-  const rawConfig = isRecord(footerFixed) ? footerFixed.codexCompat : undefined;
+  const base = parseProviderCompatConfig(agentKit, "codexCompat", enabled, headers);
+  const rawConfig = isRecord(agentKit) ? agentKit.codexCompat : undefined;
 
   return {
     ...base,
@@ -389,52 +391,60 @@ function parseCodexCompatConfig(
   };
 }
 
-export function parseFooterFixedConfig(settings: Record<string, unknown>): FooterFixedConfig {
-  const footerFixed = settings.footerFixed;
+function getAgentKitSettings(settings: Record<string, unknown>): unknown {
+  return settings[AGENT_KIT_SETTINGS_KEY];
+}
+
+function hasAgentKitSettings(settings: Record<string, unknown>): boolean {
+  return Object.prototype.hasOwnProperty.call(settings, AGENT_KIT_SETTINGS_KEY);
+}
+
+export function parseAgentKitConfig(settings: Record<string, unknown>): AgentKitConfig {
+  const agentKit = getAgentKitSettings(settings);
   const powerline = settings.powerline;
-  const providerCompat = parseProviderCompatSwitchConfig(footerFixed);
+  const providerCompat = parseProviderCompatSwitchConfig(agentKit);
 
   return {
-    fixedEditor: boolFromObject(footerFixed, "fixedEditor")
+    fixedEditor: boolFromObject(agentKit, "fixedEditor")
       ?? boolFromObject(powerline, "fixedEditor")
       ?? DEFAULT_CONFIG.fixedEditor,
-    mouseScroll: boolFromObject(footerFixed, "mouseScroll")
+    mouseScroll: boolFromObject(agentKit, "mouseScroll")
       ?? boolFromObject(powerline, "mouseScroll")
       ?? DEFAULT_CONFIG.mouseScroll,
-    showExtensionStatus: boolFromObject(footerFixed, "showExtensionStatus")
+    showExtensionStatus: boolFromObject(agentKit, "showExtensionStatus")
       ?? DEFAULT_CONFIG.showExtensionStatus,
-    taskCompletionNotification: boolFromObject(footerFixed, "taskCompletionNotification")
+    taskCompletionNotification: boolFromObject(agentKit, "taskCompletionNotification")
       ?? DEFAULT_CONFIG.taskCompletionNotification,
-    notificationChannels: parseNotificationChannelsConfig(footerFixed),
-    editorChrome: boolFromObject(footerFixed, "editorChrome")
+    notificationChannels: parseNotificationChannelsConfig(agentKit),
+    editorChrome: boolFromObject(agentKit, "editorChrome")
       ?? DEFAULT_CONFIG.editorChrome,
-    fast: parseFastConfig(footerFixed),
+    fast: parseFastConfig(agentKit),
     providerCompat,
     claudeCodeCompat: parseProviderCompatConfig(
-      footerFixed,
+      agentKit,
       "claudeCodeCompat",
       providerCompat.enabled,
       providerCompat.claudeCodeHeaders,
     ),
     codexCompat: parseCodexCompatConfig(
-      footerFixed,
+      agentKit,
       providerCompat.enabled,
       providerCompat.codexHeaders,
     ),
   };
 }
 
-export function nextFooterFixedSetting(
-  existingFooterFixedSetting: unknown,
-  updates: FooterFixedConfigUpdates,
+export function nextAgentKitSetting(
+  existingAgentKitSetting: unknown,
+  updates: AgentKitConfigUpdates,
 ): unknown {
-  const existing = isRecord(existingFooterFixedSetting) ? existingFooterFixedSetting : {};
+  const existing = isRecord(existingAgentKitSetting) ? existingAgentKitSetting : {};
   return mergeSettings(existing as Record<string, unknown>, updates as Record<string, unknown>);
 }
 
-export function writeFooterFixedSetting(
+export function writeAgentKitSetting(
   cwd: string,
-  updates: FooterFixedConfigUpdates,
+  updates: AgentKitConfigUpdates,
 ): boolean {
   const globalSettingsPath = getSettingsPath();
   const projectSettingsPath = getProjectSettingsPath(cwd);
@@ -443,18 +453,18 @@ export function writeFooterFixedSetting(
 
   if (globalSettings === null || projectSettings === null) return false;
 
-  const writeToProject = Object.prototype.hasOwnProperty.call(projectSettings, "footerFixed");
+  const writeToProject = hasAgentKitSettings(projectSettings);
   const settingsPath = writeToProject ? projectSettingsPath : globalSettingsPath;
   const settings = writeToProject ? projectSettings : globalSettings;
 
-  settings.footerFixed = nextFooterFixedSetting(settings.footerFixed, updates);
+  settings[AGENT_KIT_SETTINGS_KEY] = nextAgentKitSetting(settings[AGENT_KIT_SETTINGS_KEY], updates);
 
   try {
     mkdirSync(dirname(settingsPath), { recursive: true });
     writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + "\n");
     return true;
   } catch (error) {
-    console.debug(`[pi-footer-fixed] Failed to persist setting to ${settingsPath}:`, error);
+    console.debug(`[pi-agent-kit] Failed to persist setting to ${settingsPath}:`, error);
     return false;
   }
 }

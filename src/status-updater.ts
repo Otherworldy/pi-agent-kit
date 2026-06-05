@@ -1,4 +1,4 @@
-import type { FooterFixedConfig } from "./config.ts";
+import type { AgentKitConfig } from "./config.ts";
 import { formatFastStatusLabel, supportsFast } from "./fast-mode.ts";
 import { supportsClaudeCodeCompat, supportsCodexCompat } from "./provider-compat.ts";
 import { activeModel } from "./utils.ts";
@@ -23,7 +23,7 @@ export function getFastChromeLabel(
 export function getProviderCompatChromeLabel(
   ctx: any | undefined,
   currentModelRef: any,
-  config: FooterFixedConfig,
+  config: AgentKitConfig,
 ): string | undefined {
   if (!config.providerCompat.enabled) return undefined;
   const model = activeModel(ctx, currentModelRef);
@@ -42,12 +42,12 @@ export function updateFastStatus(
 
   const label = getFastChromeLabel(ctx, currentModelRef, fastDesired, supportedModels);
   if (!label) {
-    ctx.ui.setStatus("footer-fixed-fast", undefined);
+    ctx.ui.setStatus("agent-kit-fast", undefined);
     return;
   }
 
   const color = supportsFast(activeModel(ctx, currentModelRef), supportedModels) ? "accent" : "warning";
-  ctx.ui.setStatus("footer-fixed-fast", ctx.ui.theme?.fg?.(color, label) ?? label);
+  ctx.ui.setStatus("agent-kit-fast", ctx.ui.theme?.fg?.(color, label) ?? label);
 }
 
 /**
@@ -56,22 +56,22 @@ export function updateFastStatus(
 export function updateClaudeCodeCompatStatus(
   ctx: any,
   currentModelRef: any,
-  config: FooterFixedConfig,
+  config: AgentKitConfig,
 ): void {
   if (!ctx?.hasUI || typeof ctx.ui?.setStatus !== "function") return;
 
   if (!config.claudeCodeCompat.enabled) {
-    ctx.ui.setStatus("footer-fixed-claude-code", undefined);
+    ctx.ui.setStatus("agent-kit-claude-code", undefined);
     return;
   }
 
   const active = supportsClaudeCodeCompat(activeModel(ctx, currentModelRef), config.claudeCodeCompat);
   if (!active) {
-    ctx.ui.setStatus("footer-fixed-claude-code", undefined);
+    ctx.ui.setStatus("agent-kit-claude-code", undefined);
     return;
   }
 
-  ctx.ui.setStatus("footer-fixed-claude-code", ctx.ui.theme?.fg?.("accent", "CC compat") ?? "CC compat");
+  ctx.ui.setStatus("agent-kit-claude-code", ctx.ui.theme?.fg?.("accent", "CC compat") ?? "CC compat");
 }
 
 /**
@@ -80,22 +80,22 @@ export function updateClaudeCodeCompatStatus(
 export function updateCodexCompatStatus(
   ctx: any,
   currentModelRef: any,
-  config: FooterFixedConfig,
+  config: AgentKitConfig,
 ): void {
   if (!ctx?.hasUI || typeof ctx.ui?.setStatus !== "function") return;
 
   if (!config.codexCompat.enabled) {
-    ctx.ui.setStatus("footer-fixed-codex", undefined);
+    ctx.ui.setStatus("agent-kit-codex", undefined);
     return;
   }
 
   const active = supportsCodexCompat(activeModel(ctx, currentModelRef), config.codexCompat);
   if (!active) {
-    ctx.ui.setStatus("footer-fixed-codex", undefined);
+    ctx.ui.setStatus("agent-kit-codex", undefined);
     return;
   }
 
-  ctx.ui.setStatus("footer-fixed-codex", ctx.ui.theme?.fg?.("accent", "Codex compat") ?? "Codex compat");
+  ctx.ui.setStatus("agent-kit-codex", ctx.ui.theme?.fg?.("accent", "Codex compat") ?? "Codex compat");
 }
 
 /**
@@ -105,7 +105,7 @@ export function updateProviderStatuses(
   ctx: any,
   currentModelRef: any,
   fastDesired: boolean,
-  config: FooterFixedConfig,
+  config: AgentKitConfig,
 ): void {
   updateFastStatus(ctx, currentModelRef, fastDesired, config.fast.supportedModels);
   updateClaudeCodeCompatStatus(ctx, currentModelRef, config);
