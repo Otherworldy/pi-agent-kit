@@ -328,6 +328,7 @@ test("plugin exports a default factory and registers lifecycle hooks plus comman
 
   assert.deepEqual(events, [
     "before_provider_request",
+    "turn_start",
     "session_start",
     "thinking_level_select",
     "model_select",
@@ -588,13 +589,28 @@ test("provider compat switch auto-registers Codex headers and patches responses 
     await harness.sessionStart({ reason: "new" }, harness.ctx);
 
     const providerConfig = harness.providerRegistrations.get("my-codex") as { headers: Record<string, string> };
+    const readTurnMetadata = () => {
+      const latestConfig = harness.providerRegistrations.get("my-codex") as { headers: Record<string, string> };
+      return JSON.parse(latestConfig.headers["X-Codex-Turn-Metadata"]);
+    };
     assert.equal(providerConfig.headers.Originator, "codex_cli_rs");
     assert.equal(providerConfig.headers["User-Agent"], "codex_cli_rs/test");
     assert.equal(providerConfig.headers["OpenAI-Beta"], "responses=experimental");
     assert.equal(providerConfig.headers["X-Codex-Beta-Features"], "remote_compaction_v2");
     assert.equal(providerConfig.headers.Session_id, "pi-agent");
-    assert.equal(JSON.parse(providerConfig.headers["X-Codex-Turn-Metadata"]).model, "gpt-5.5");
+    const sessionMetadata = readTurnMetadata();
+    assert.equal(sessionMetadata.model, "gpt-5.5");
     assert.equal(harness.statuses.get("footer-fixed-codex"), "Codex compat");
+
+    await harness.emit("turn_start", { turnIndex: 0, timestamp: Date.now() });
+    const firstTurnMetadata = readTurnMetadata();
+    assert.notEqual(firstTurnMetadata.turn_id, sessionMetadata.turn_id);
+    assert.equal(firstTurnMetadata.model, "gpt-5.5");
+
+    await harness.emit("turn_start", { turnIndex: 1, timestamp: Date.now() });
+    const secondTurnMetadata = readTurnMetadata();
+    assert.notEqual(secondTurnMetadata.turn_id, firstTurnMetadata.turn_id);
+    assert.equal(secondTurnMetadata.model, "gpt-5.5");
 
     assert.deepEqual(await harness.emit("before_provider_request", {
       payload: {

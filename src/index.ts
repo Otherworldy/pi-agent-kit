@@ -99,6 +99,18 @@ export default function footerFixedPlugin(pi: ExtensionAPI) {
     });
   }
 
+  function refreshProviderCompatProviders(ctx: any): void {
+    const { claudeProviders, codexProviders } = registerProviderCompatProviders(
+      pi,
+      ctx,
+      state.currentModelRef,
+      config,
+      state.previousCompatProviderConfigs,
+    );
+    state.registeredClaudeCodeCompatProviders = claudeProviders;
+    state.registeredCodexCompatProviders = codexProviders;
+  }
+
   /**
    * 应用设置
    */
@@ -118,15 +130,7 @@ export default function footerFixedPlugin(pi: ExtensionAPI) {
       config.providerCompat.enabled = value;
       config.claudeCodeCompat.enabled = value;
       config.codexCompat.enabled = value;
-      const { claudeProviders, codexProviders } = registerProviderCompatProviders(
-        pi,
-        ctx,
-        state.currentModelRef,
-        config,
-        state.previousCompatProviderConfigs,
-      );
-      state.registeredClaudeCodeCompatProviders = claudeProviders;
-      state.registeredCodexCompatProviders = codexProviders;
+      refreshProviderCompatProviders(ctx);
       updateProviderStatuses(ctx, state.currentModelRef, state.fastDesired, config);
       return;
     }
@@ -176,15 +180,7 @@ export default function footerFixedPlugin(pi: ExtensionAPI) {
     config.codexCompat.enabled = providerCompatDesired;
     state.fastDesired = config.fast.enabled || pi.getFlag?.("fast") === true;
     config.fast.enabled = state.fastDesired;
-    const { claudeProviders, codexProviders } = registerProviderCompatProviders(
-      pi,
-      ctx,
-      state.currentModelRef,
-      config,
-      state.previousCompatProviderConfigs,
-    );
-    state.registeredClaudeCodeCompatProviders = claudeProviders;
-    state.registeredCodexCompatProviders = codexProviders;
+    refreshProviderCompatProviders(ctx);
     updateProviderStatuses(ctx, state.currentModelRef, state.fastDesired, config);
   }
 
@@ -260,6 +256,12 @@ export default function footerFixedPlugin(pi: ExtensionAPI) {
     return codexPayload ?? claudeCodePayload ?? fastPayload;
   });
 
+  pi.on("turn_start", async (_event, ctx) => {
+    state.activeCtxRef = ctx;
+    state.currentModelRef = activeModel(ctx, state.currentModelRef);
+    refreshProviderCompatProviders(ctx);
+  });
+
   pi.on("session_start", async (_event, ctx: ExtensionContext) => {
     config = parseFooterFixedConfig(readSettings(ctx.cwd));
     resetPluginState(state);
@@ -269,15 +271,7 @@ export default function footerFixedPlugin(pi: ExtensionAPI) {
     state.currentModelRef = ctx.model;
     state.fastDesired = config.fast.enabled || pi.getFlag?.("fast") === true;
     config.fast.enabled = state.fastDesired;
-    const { claudeProviders, codexProviders } = registerProviderCompatProviders(
-      pi,
-      ctx,
-      state.currentModelRef,
-      config,
-      state.previousCompatProviderConfigs,
-    );
-    state.registeredClaudeCodeCompatProviders = claudeProviders;
-    state.registeredCodexCompatProviders = codexProviders;
+    refreshProviderCompatProviders(ctx);
     updateProviderStatuses(ctx, state.currentModelRef, state.fastDesired, config);
 
     if (!ctx.hasUI) return;
@@ -299,15 +293,7 @@ export default function footerFixedPlugin(pi: ExtensionAPI) {
   pi.on("model_select", async (event, ctx) => {
     state.activeCtxRef = ctx;
     state.currentModelRef = event.model ?? ctx.model;
-    const { claudeProviders, codexProviders } = registerProviderCompatProviders(
-      pi,
-      ctx,
-      state.currentModelRef,
-      config,
-      state.previousCompatProviderConfigs,
-    );
-    state.registeredClaudeCodeCompatProviders = claudeProviders;
-    state.registeredCodexCompatProviders = codexProviders;
+    refreshProviderCompatProviders(ctx);
     updateProviderStatuses(ctx, state.currentModelRef, state.fastDesired, config);
     if (ctx.hasUI) {
       state.fixedEditorCompositor?.requestRepaint();
