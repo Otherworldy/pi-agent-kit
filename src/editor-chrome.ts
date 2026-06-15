@@ -15,7 +15,7 @@ type ThemeLike = {
 
 export interface EditorChromeContextLike {
   cwd?: string;
-  model?: { contextWindow?: number; id?: string; provider?: string };
+  model?: { contextWindow?: number; id?: string; name?: string; provider?: string };
   ui?: { theme?: ThemeLike };
   getContextUsage?: () => { percent?: number | null; contextWindow?: number; tokens?: number | null } | undefined;
 }
@@ -160,8 +160,8 @@ function compactModelId(modelId: string, maxWidth: number): string {
   return truncateToWidth(simplified, maxWidth, "…");
 }
 
-function modelChromeId(context: EditorChromeContextLike): string {
-  const modelId = context.model?.id ?? "model unknown";
+function modelChromeLabel(context: EditorChromeContextLike): string {
+  const modelId = context.model?.name ?? context.model?.id ?? "model unknown";
   return context.model?.provider ? `${context.model.provider}/${modelId}` : modelId;
 }
 
@@ -245,7 +245,7 @@ function buildTopLabels(
   const theme = context.ui?.theme;
   const cwd = context.cwd ?? process.cwd();
   const git = formatGitLabel(theme, getGitInfo(cwd));
-  const modelId = modelChromeId(context);
+  const modelLabel = modelChromeLabel(context);
   const innerWidth = Math.max(0, width - 2);
   const maxRight = Math.max(0, Math.floor(innerWidth * 0.46));
   const gitWidth = Math.min(visibleWidth(git), maxRight);
@@ -259,7 +259,7 @@ function buildTopLabels(
   const fixedWidth = fixedParts.reduce((total, part) => total + visibleWidth(part), 0);
   const separatorWidth = visibleWidth(separator) * fixedParts.length;
   const modelMaxWidth = Math.max(1, innerWidth - gitWidth - fixedWidth - separatorWidth - 3);
-  const model = fg(theme, "text", compactModelId(modelId, modelMaxWidth));
+  const model = fg(theme, "text", compactModelId(modelLabel, modelMaxWidth));
   const leftParts = [model, ...fixedParts];
 
   return {
