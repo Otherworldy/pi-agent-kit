@@ -39,7 +39,7 @@ function isClaudeLikeModel(model: ProviderCompatModelLike | null | undefined): b
 
 function isCodexLikeModel(model: ProviderCompatModelLike | null | undefined): boolean {
   if (isClaudeLikeModel(model)) return false;
-  if (model?.api === "openai-codex-responses") return true;
+  if (model?.api === "openai-codex-responses" || model?.api === "openai-completions") return true;
   const text = normalizedModelText(model);
   if (text.includes("codex")) return true;
   if (model?.api === "openai-responses") return true;

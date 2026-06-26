@@ -61,6 +61,7 @@ test("provider compat auto-detects Claude Code and Codex model families", () => 
 
   assert.equal(supportsCodexCompat({ provider: "my-codex", id: "gpt-5.5", api: "openai-responses" }, codexConfig), true);
   assert.equal(supportsCodexCompat({ provider: "openai-codex", id: "gpt-5.5", api: "openai-codex-responses" }, codexConfig), true);
+  assert.equal(supportsCodexCompat({ provider: "my-openai", id: "custom-model", api: "openai-completions" }, codexConfig), true);
   assert.equal(supportsCodexCompat({ provider: "my-claude", id: "claude-sonnet", api: "openai-responses" }, codexConfig), false);
   assert.equal(supportsCodexCompat({ provider: "my-codex", id: "gpt-5.5", api: "openai-responses" }, { ...codexConfig, enabled: false }), false);
 });
@@ -69,6 +70,7 @@ test("provider compat registers only the active provider for the detected family
   assert.deepEqual(getClaudeCodeCompatProviderNames(claudeConfig, { provider: "my-claude", id: "claude-sonnet" }), ["my-claude"]);
   assert.deepEqual(getClaudeCodeCompatProviderNames(claudeConfig, { provider: "my-codex", id: "gpt-5.5", api: "openai-responses" }), []);
   assert.deepEqual(getCodexCompatProviderNames(codexConfig, { provider: "my-codex", id: "gpt-5.5", api: "openai-responses" }), ["my-codex"]);
+  assert.deepEqual(getCodexCompatProviderNames(codexConfig, { provider: "my-openai", id: "custom-model", api: "openai-completions" }), ["my-openai"]);
   assert.deepEqual(getCodexCompatProviderNames(codexConfig, { provider: "my-claude", id: "claude-sonnet" }), []);
 });
 

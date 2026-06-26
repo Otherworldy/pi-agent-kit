@@ -136,7 +136,7 @@ Some Claude/NewAPI-compatible gateways validate that requests look like Claude C
 }
 ```
 
-Claude-like models automatically receive Claude Code headers and payload patching (`metadata.user_id` plus the Claude Code identity system text). Codex/OpenAI Responses-like models automatically receive Codex CLI headers (`Originator`, `Session_id`, `User-Agent`, `OpenAI-Beta`, `X-Codex-Beta-Features`, and `X-Codex-Turn-Metadata`) and Responses payload patching (`prompt_cache_key`, `store`, `instructions`, and `client_metadata.x-codex-installation-id`). Existing provider headers are preserved and compatibility headers override duplicates while the plugin-page switch is on. Run `/fast reload` after editing header overrides to reload fast mode and provider compatibility settings without changing the plugin-page switch state.
+Claude-like models automatically receive Claude Code headers and payload patching (`metadata.user_id` plus the Claude Code identity system text). Codex/OpenAI-compatible models automatically receive Codex CLI headers (`Originator`, `Session_id`, `User-Agent`, `OpenAI-Beta`, `X-Codex-Beta-Features`, and `X-Codex-Turn-Metadata`); OpenAI Responses-like models also receive Responses payload patching (`prompt_cache_key`, `store`, `instructions`, and `client_metadata.x-codex-installation-id`). Existing provider headers are preserved and compatibility headers override duplicates while the plugin-page switch is on. Run `/fast reload` after editing header overrides to reload fast mode and provider compatibility settings without changing the plugin-page switch state.
 
 Nested header config is also accepted if you prefer grouping by profile:
 
