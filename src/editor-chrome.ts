@@ -6,8 +6,9 @@ import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 
 const GIT_CACHE_MS = 2000;
 const MIN_CHROME_WIDTH = 16;
-const BODY_HORIZONTAL_PADDING = 1;
+const BODY_HORIZONTAL_PADDING = 0;
 const BODY_VERTICAL_PADDING = 1;
+const RIGHT_LABEL_MAX_RATIO = 0.58;
 
 type ThemeLike = {
   fg?: (color: ThemeColor, text: string) => string;
@@ -36,6 +37,7 @@ interface GitInfo {
   changedFiles: number;
   added: number;
   removed: number;
+  isRepository: boolean;
 }
 
 let gitCache: { cwd: string; at: number; info: GitInfo } | undefined;
@@ -61,6 +63,13 @@ function getGitInfo(cwd: string): GitInfo {
   const now = Date.now();
   if (gitCache && gitCache.cwd === cwd && now - gitCache.at < GIT_CACHE_MS) return gitCache.info;
 
+  const isRepository = runGit(cwd, ["rev-parse", "--is-inside-work-tree"]) === "true";
+  if (!isRepository) {
+    const info = { branch: null, changedFiles: 0, added: 0, removed: 0, isRepository };
+    gitCache = { cwd, at: now, info };
+    return info;
+  }
+
   const branch = runGit(cwd, ["branch", "--show-current"])
     || runGit(cwd, ["rev-parse", "--short", "HEAD"])
     || null;
@@ -80,7 +89,7 @@ function getGitInfo(cwd: string): GitInfo {
     if (Number.isFinite(removedCount)) removed += removedCount;
   }
 
-  const info = { branch, changedFiles, added, removed };
+  const info = { branch, changedFiles, added, removed, isRepository };
   gitCache = { cwd, at: now, info };
   return info;
 }
@@ -177,39 +186,60 @@ function compactPath(cwd: string): string {
   return cwd;
 }
 
-function formatGitLabel(theme: ThemeLike | undefined, git: GitInfo): string {
-  if (!git.branch && git.changedFiles === 0) return "";
-
-  const parts: string[] = [];
-  if (git.branch) parts.push(`${fg(theme, "accent", "⑂")} ${fg(theme, "muted", git.branch)}`);
-
-  if (git.changedFiles === 0) {
-    parts.push(`${fg(theme, "success", "✓")} ${fg(theme, "success", "clean")}`);
-  } else {
-    const changes = [`${fg(theme, "warning", "●")} ${fg(theme, "warning", `${git.changedFiles}Δ`)}`];
-    if (git.added > 0) changes.push(fg(theme, "toolDiffAdded", `+${git.added}`));
-    if (git.removed > 0) changes.push(fg(theme, "toolDiffRemoved", `-${git.removed}`));
-    parts.push(changes.join(" "));
-  }
-
-  return ` ${parts.join(fg(theme, "dim", " · "))} `;
+function rightLabelMaxWidth(innerWidth: number): number {
+  return Math.max(0, Math.floor(innerWidth * RIGHT_LABEL_MAX_RATIO));
 }
 
-function borderWithLabels(
+function formatGitLabel(theme: ThemeLike | undefined, git: GitInfo, maxWidth: number): string {
+  const contentWidth = Math.max(0, maxWidth - 2);
+  if (contentWidth === 0) return "";
+
+  if (!git.isRepository) return "";
+  if (!git.branch && git.changedFiles === 0) return "";
+
+  const separator = fg(theme, "dim", " · ");
+  const branch = git.branch ? `${fg(theme, "accent", "⑂")} ${fg(theme, "muted", git.branch)}` : "";
+  const compactStatus = git.changedFiles === 0
+    ? fg(theme, "success", "✓")
+    : `${fg(theme, "warning", "●")} ${fg(theme, "warning", `${git.changedFiles}Δ`)}`;
+  const fullStatus = git.changedFiles === 0
+    ? `${fg(theme, "success", "✓")} ${fg(theme, "success", "clean")}`
+    : [
+      compactStatus,
+      git.added > 0 ? fg(theme, "toolDiffAdded", `+${git.added}`) : "",
+      git.removed > 0 ? fg(theme, "toolDiffRemoved", `-${git.removed}`) : "",
+    ].filter(Boolean).join(" ");
+
+  const fullLabel = branch ? `${branch}${separator}${fullStatus}` : fullStatus;
+  if (visibleWidth(fullLabel) <= contentWidth) return ` ${fullLabel} `;
+
+  const compactLabel = branch ? `${branch}${separator}${compactStatus}` : compactStatus;
+  if (visibleWidth(compactLabel) <= contentWidth) return ` ${compactLabel} `;
+
+  if (branch) {
+    const branchWidth = contentWidth - visibleWidth(separator) - visibleWidth(compactStatus);
+    if (branchWidth > 0) return ` ${truncateToWidth(branch, branchWidth, "…")}${separator}${compactStatus} `;
+  }
+
+  if (visibleWidth(fullStatus) <= contentWidth) return ` ${fullStatus} `;
+  if (visibleWidth(compactStatus) <= contentWidth) return ` ${compactStatus} `;
+
+  return ` ${truncateToWidth(compactStatus, contentWidth, "…")} `;
+}
+
+function horizontalRuleWithLabels(
   width: number,
   leftLabel: string,
   rightLabel: string,
-  leftCorner: string,
-  rightCorner: string,
   borderColor: (text: string) => string,
 ): string {
   const innerWidth = Math.max(0, width - 2);
-  const maxRight = Math.max(0, Math.floor(innerWidth * 0.46));
+  const maxRight = rightLabelMaxWidth(innerWidth);
   const right = truncateToWidth(rightLabel, maxRight, "…");
   const left = truncateToWidth(leftLabel, Math.max(0, innerWidth - visibleWidth(right) - 1), "…");
   const fill = Math.max(0, innerWidth - visibleWidth(left) - visibleWidth(right));
 
-  return borderColor(leftCorner) + left + borderColor("─".repeat(fill)) + right + borderColor(rightCorner);
+  return borderColor("─") + left + borderColor("─".repeat(fill)) + right + borderColor("─");
 }
 
 function padLine(line: string, width: number): string {
@@ -244,10 +274,10 @@ function buildTopLabels(
 ): { left: string; right: string } {
   const theme = context.ui?.theme;
   const cwd = context.cwd ?? process.cwd();
-  const git = formatGitLabel(theme, getGitInfo(cwd));
-  const modelLabel = modelChromeLabel(context);
   const innerWidth = Math.max(0, width - 2);
-  const maxRight = Math.max(0, Math.floor(innerWidth * 0.46));
+  const maxRight = rightLabelMaxWidth(innerWidth);
+  const git = formatGitLabel(theme, getGitInfo(cwd), maxRight);
+  const modelLabel = modelChromeLabel(context);
   const gitWidth = Math.min(visibleWidth(git), maxRight);
   const thinkingText = thinkingLevel || "off";
   const thinking = fg(theme, thinkingColor(thinkingText), thinkingText);
@@ -284,8 +314,7 @@ export function renderEditorChrome(input: EditorChromeRenderInput): string[] {
 
   const paddingX = width >= BODY_HORIZONTAL_PADDING * 2 + 3 ? BODY_HORIZONTAL_PADDING : 0;
   const paddingY = BODY_VERTICAL_PADDING;
-  const bodyWidth = Math.max(1, width - 2 - paddingX * 2);
-  const bodyOuterWidth = bodyWidth + paddingX * 2;
+  const bodyWidth = Math.max(1, width - paddingX * 2);
   const baseLines = input.renderBase(bodyWidth);
   const split = splitEditorRender(baseLines);
   if (!split) return input.renderBase(input.width);
@@ -294,16 +323,16 @@ export function renderEditorChrome(input: EditorChromeRenderInput): string[] {
   const top = buildTopLabels(input.context, input.thinkingLevel, width, input.providerCompatLabel, input.fastLabel);
   const bottom = buildBottomLabels(input.context);
   const bodyPadding = " ".repeat(paddingX);
-  const popupPadding = " ".repeat(paddingX + 1);
-  const wrapBodyLine = (line: string) => `${borderColor("│")}${bodyPadding}${padLine(line, bodyWidth)}${bodyPadding}${borderColor("│")}`;
-  const verticalPadding = Array.from({ length: paddingY }, () => `${borderColor("│")}${blankBodyLine(bodyOuterWidth)}${borderColor("│")}`);
+  const popupPadding = " ".repeat(paddingX);
+  const wrapBodyLine = (line: string) => `${bodyPadding}${padLine(line, bodyWidth)}${bodyPadding}`;
+  const verticalPadding = Array.from({ length: paddingY }, () => blankBodyLine(width));
 
   return [
-    borderWithLabels(width, top.left, top.right, "╭", "╮", borderColor),
+    horizontalRuleWithLabels(width, top.left, top.right, borderColor),
     ...verticalPadding,
     ...split.bodyLines.map(wrapBodyLine),
     ...verticalPadding,
-    borderWithLabels(width, bottom.left, bottom.right, "╰", "╯", borderColor),
+    horizontalRuleWithLabels(width, bottom.left, bottom.right, borderColor),
     ...split.popupLines.map((line) => padLine(`${popupPadding}${line}`, width)),
   ];
 }

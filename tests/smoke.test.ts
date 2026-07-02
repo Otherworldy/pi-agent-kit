@@ -5,6 +5,7 @@ import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { initTheme } from "@earendil-works/pi-coding-agent";
+import { clearEditorChromeGitCache, renderEditorChrome } from "../src/editor-chrome.ts";
 import agentKitPlugin from "../src/index.ts";
 
 // 增加EventEmitter监听器限制，避免测试中的警告
@@ -606,10 +607,38 @@ test("editor chrome renders model, thinking level, context usage, git status, cw
     assert.ok(lines[0]?.includes("main"));
     assert.match(lines[0] ?? "", /clean|Δ/);
     assert.ok(lines.at(-1)?.includes("project"));
-    assert.equal(lines[1], `│${" ".repeat(118)}│`);
-    assert.equal(lines[2]?.startsWith("│ "), true);
-    assert.equal(lines[2]?.endsWith(" │"), true);
+    assert.equal(lines[1], " ".repeat(120));
+    assert.equal(lines[2]?.startsWith(" "), true);
+    assert.equal(lines[2]?.endsWith(" "), true);
+    assert.equal(lines[2]?.includes("│"), false);
+
+    const narrowLines = harness.mountedEditor.render(40);
+    assert.ok(narrowLines[0]?.includes("main"));
+    assert.match(narrowLines[0] ?? "", /clean|Δ/);
   });
+});
+
+test("editor chrome omits git status outside repositories", () => {
+  const cwd = mkdtempSync(join(tmpdir(), "pi-agent-kit-nogit-"));
+
+  try {
+    clearEditorChromeGitCache();
+    const lines = renderEditorChrome({
+      width: 80,
+      enabled: true,
+      context: {
+        cwd,
+        model: { id: "model" },
+        ui: { theme: { fg: (_kind: string, text: string) => text } },
+      },
+      thinkingLevel: "off",
+      renderBase: (width) => ["─".repeat(width), "body".padEnd(width), "─".repeat(width)],
+    });
+
+    assert.equal(lines[0]?.includes("no git"), false);
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
 });
 
 test("editor chrome keeps autocomplete popup rows below the custom border", async () => {
@@ -630,7 +659,8 @@ test("editor chrome keeps autocomplete popup rows below the custom border", asyn
     await harness.sessionStart({ reason: "new" }, harness.ctx);
 
     const lines = harness.mountedEditor.render(80);
-    assert.equal(lines.at(-2)?.startsWith("╰"), true);
+    assert.equal(lines.at(-2)?.startsWith("─"), true);
+    assert.equal(lines.at(-2)?.includes("╰"), false);
     assert.match(lines.at(-1) ?? "", /popup/);
   });
 });
