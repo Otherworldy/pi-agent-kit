@@ -1,6 +1,7 @@
 import type { ExtensionContext, ReadonlyFooterDataProvider } from "@earendil-works/pi-coding-agent";
 import type { TerminalSplitCompositor } from "./fixed-editor/terminal-split.ts";
 import type { AgentKitConfig } from "./config.ts";
+import type { ContinueFailureSnapshot } from "./continue-mode.ts";
 
 /**
  * 插件状态管理
@@ -40,6 +41,13 @@ export interface PluginState {
   registeredClaudeCodeCompatProviders: Set<string>;
   registeredCodexCompatProviders: Set<string>;
   previousCompatProviderConfigs: Map<string, ProviderRequestConfig | null>;
+
+  // 任务完成通知状态
+  taskCompletionErrorNotificationTimer: ReturnType<typeof setTimeout> | null;
+
+  // /continue失败恢复状态
+  lastContinueFailure: ContinueFailureSnapshot | null;
+  pendingContinueRequest: ContinuePendingRequest | null;
 }
 
 export type EditorFactory = (tui: any, theme: any, keybindings: any) => any;
@@ -51,6 +59,19 @@ export interface ProviderRequestConfig {
   apiKey?: string;
   authHeader?: boolean;
   headers?: Record<string, string>;
+}
+
+export interface ContinuePendingRequest {
+  id: string;
+  failureFingerprint: string;
+  startedAt: number;
+  contextApplied: boolean;
+}
+
+function clearTaskCompletionErrorNotificationTimer(state: PluginState): void {
+  if (!state.taskCompletionErrorNotificationTimer) return;
+  clearTimeout(state.taskCompletionErrorNotificationTimer);
+  state.taskCompletionErrorNotificationTimer = null;
 }
 
 /**
@@ -80,6 +101,9 @@ export function createPluginState(): PluginState {
     registeredClaudeCodeCompatProviders: new Set(),
     registeredCodexCompatProviders: new Set(),
     previousCompatProviderConfigs: new Map(),
+    taskCompletionErrorNotificationTimer: null,
+    lastContinueFailure: null,
+    pendingContinueRequest: null,
   };
 }
 
@@ -87,17 +111,21 @@ export function createPluginState(): PluginState {
  * 重置插件状态（用于session_start）
  */
 export function resetPluginState(state: PluginState): void {
+  clearTaskCompletionErrorNotificationTimer(state);
   state.needsFixedEditorReinstall = false;
   state.installRetryAttempts = 0;
   state.currentEditor = null;
   state.tuiRef = null;
   state.footerDataRef = null;
+  state.lastContinueFailure = null;
+  state.pendingContinueRequest = null;
 }
 
 /**
  * 清理插件状态（用于session_shutdown）
  */
 export function cleanupPluginState(state: PluginState): void {
+  clearTaskCompletionErrorNotificationTimer(state);
   state.installRetryAttempts = 0;
   state.registeredClaudeCodeCompatProviders = new Set();
   state.registeredCodexCompatProviders = new Set();
@@ -107,4 +135,6 @@ export function cleanupPluginState(state: PluginState): void {
   state.activeCtxRef = null;
   state.footerDataRef = null;
   state.currentModelRef = null;
+  state.lastContinueFailure = null;
+  state.pendingContinueRequest = null;
 }

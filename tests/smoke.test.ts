@@ -115,8 +115,10 @@ function createHarness(cwd: string, options: { synchronousEditorComponent?: bool
   let customState: { panel: any; done: () => void } | undefined;
   let mountedEditor: any;
   let thinkingLevel = "high";
+  let idle = true;
 
   const notifies: Array<{ message: string; type: string | undefined }> = [];
+  const sentMessages: Array<{ message: unknown; options: unknown }> = [];
   const widgetCalls: Array<{ key: string; content: unknown; options: unknown }> = [];
   const statuses = new Map<string, string>();
   const flags = new Map<string, boolean | string>();
@@ -215,6 +217,9 @@ function createHarness(cwd: string, options: { synchronousEditorComponent?: bool
     getThinkingLevel() {
       return thinkingLevel;
     },
+    sendMessage(message: unknown, options: unknown) {
+      sentMessages.push({ message, options });
+    },
     registerProvider(name: string, providerConfig: unknown) {
       providerRegistrations.set(name, providerConfig);
     },
@@ -233,6 +238,7 @@ function createHarness(cwd: string, options: { synchronousEditorComponent?: bool
     sessionManager: { getEntries: () => [] },
     modelRegistry: { providerRequestConfigs: new Map<string, unknown>() },
     getContextUsage: () => ({ contextWindow: 200000, percent: 42, tokens: 84000 }),
+    isIdle: () => idle,
   };
 
   async function startWithMountedEditor() {
@@ -263,6 +269,7 @@ function createHarness(cwd: string, options: { synchronousEditorComponent?: bool
   return {
     ctx,
     notifies,
+    sentMessages,
     statuses,
     widgetCalls,
     editorFactories,
@@ -281,6 +288,9 @@ function createHarness(cwd: string, options: { synchronousEditorComponent?: bool
     },
     get sessionStart() {
       return sessionStart;
+    },
+    setIdle(value: boolean) {
+      idle = value;
     },
     async emit(event: string, payload: any = {}) {
       let result: unknown;
@@ -327,6 +337,7 @@ test("plugin exports a default factory and registers lifecycle hooks plus comman
   agentKitPlugin(api as never);
 
   assert.deepEqual(events, [
+    "context",
     "before_provider_request",
     "turn_start",
     "session_start",
@@ -335,8 +346,126 @@ test("plugin exports a default factory and registers lifecycle hooks plus comman
     "agent_end",
     "session_shutdown",
   ]);
-  assert.deepEqual(commands, ["agent-kit", "fast"]);
+  assert.deepEqual(commands, ["agent-kit", "fast", "continue"]);
   assert.deepEqual(flags, ["fast"]);
+});
+
+test("continue command reports when there is no failed assistant response", async () => {
+  await withTempSettings(async ({ cwd }) => {
+    const harness = createHarness(cwd);
+
+    await harness.runCommand("continue");
+
+    assert.equal(harness.sentMessages.length, 0);
+    assert.deepEqual(harness.notifies.at(-1), {
+      message: "No failed assistant response is available to continue.",
+      type: "info",
+    });
+  });
+});
+
+test("continue command refuses while the agent is still running", async () => {
+  await withTempSettings(async ({ cwd }) => {
+    const harness = createHarness(cwd);
+    harness.setIdle(false);
+
+    await harness.runCommand("continue");
+
+    assert.equal(harness.sentMessages.length, 0);
+    assert.deepEqual(harness.notifies.at(-1), {
+      message: "Pi Agent is still running. Wait for it to stop before using /continue.",
+      type: "warning",
+    });
+  });
+});
+
+test("continue command triggers one hidden retry request after an assistant error", async () => {
+  await withTempSettings(async ({ cwd }) => {
+    const harness = createHarness(cwd);
+    const userMessage = { role: "user", content: [{ type: "text", text: "make a change" }], timestamp: 1000 };
+    const failedAssistant = {
+      role: "assistant",
+      content: [{ type: "text", text: "partial answer" }],
+      stopReason: "error",
+      errorMessage: "provider returned error 503",
+      timestamp: 2000,
+    };
+
+    await harness.emit("agent_end", { messages: [userMessage, failedAssistant] });
+    await harness.runCommand("continue");
+    await harness.runCommand("continue");
+
+    assert.equal(harness.sentMessages.length, 1);
+    const sent = harness.sentMessages[0];
+    assert.deepEqual(sent.options, { triggerTurn: true });
+    assert.equal((sent.message as any).customType, "pi-agent-kit.continue");
+    assert.equal((sent.message as any).display, false);
+    assert.equal(typeof (sent.message as any).details?.requestId, "string");
+    assert.equal(typeof (sent.message as any).details?.failureFingerprint, "string");
+    assert.deepEqual(harness.notifies.at(-1), {
+      message: "A /continue retry is already pending for the last failure.",
+      type: "warning",
+    });
+  });
+});
+
+test("continue failure state clears after a later successful assistant response", async () => {
+  await withTempSettings(async ({ cwd }) => {
+    const harness = createHarness(cwd);
+    const userMessage = { role: "user", content: [{ type: "text", text: "make a change" }], timestamp: 1000 };
+    const failedAssistant = {
+      role: "assistant",
+      content: [{ type: "text", text: "partial answer" }],
+      stopReason: "error",
+      errorMessage: "provider returned error 503",
+      timestamp: 2000,
+    };
+    const successfulAssistant = {
+      role: "assistant",
+      content: [{ type: "text", text: "done" }],
+      stopReason: "stop",
+      timestamp: 3000,
+    };
+
+    await harness.emit("agent_end", { messages: [userMessage, failedAssistant] });
+    await harness.emit("agent_end", { messages: [userMessage, failedAssistant, successfulAssistant] });
+    await harness.runCommand("continue");
+
+    assert.equal(harness.sentMessages.length, 0);
+    assert.deepEqual(harness.notifies.at(-1), {
+      message: "No failed assistant response is available to continue.",
+      type: "info",
+    });
+  });
+});
+
+test("continue context filter removes the failed assistant and internal trigger once", async () => {
+  await withTempSettings(async ({ cwd }) => {
+    const harness = createHarness(cwd);
+    const userMessage = { role: "user", content: [{ type: "text", text: "make a change" }], timestamp: 1000 };
+    const failedAssistant = {
+      role: "assistant",
+      content: [{ type: "text", text: "partial answer" }],
+      stopReason: "error",
+      errorMessage: "provider returned error 503",
+      timestamp: 2000,
+    };
+
+    await harness.emit("agent_end", { messages: [userMessage, failedAssistant] });
+    await harness.runCommand("continue");
+
+    const triggerMessage = {
+      role: "custom",
+      ...(harness.sentMessages[0].message as Record<string, unknown>),
+      timestamp: 3000,
+    };
+    const contextMessages = [userMessage, failedAssistant, triggerMessage];
+    const filtered = await harness.emit("context", { messages: contextMessages }) as { messages: unknown[] };
+    const secondFilter = await harness.emit("context", { messages: contextMessages });
+
+    assert.deepEqual(filtered.messages, [userMessage]);
+    assert.equal(secondFilter, undefined);
+  });
 });
 
 test("default startup installs fixed editor with mouse scrolling before settings are changed", async () => {

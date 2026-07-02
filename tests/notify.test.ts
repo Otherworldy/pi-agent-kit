@@ -1,18 +1,37 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { nextAgentKitSetting, parseAgentKitConfig } from "../src/config.ts";
+import { nextAgentKitSetting, parseAgentKitConfig, type NotificationChannelsConfig } from "../src/config.ts";
 import {
+  clearPendingTaskCompletionErrorNotification,
   getTaskCompletionNotificationAnswer,
   getTaskCompletionNotificationStatus,
   isSubagentProcess,
+  notifyTaskCompleteCoalesced,
   notifyTaskCompleteTelegram,
   shouldNotifyTaskCompletion,
   shouldNotifyTaskCompletionWindows,
   shouldSendTaskCompletionNotification,
   supportsWindowsToast,
   taskCompletionNotificationMessage,
+  type TaskCompletionNotificationCoalescingState,
+  type TaskCompletionNotificationStatus,
   type TelegramFetch,
 } from "../src/notify.ts";
+
+function wait(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function disabledNotificationChannels(): NotificationChannelsConfig {
+  return {
+    windowsToast: { enabled: false },
+    telegram: {
+      enabled: false,
+      apiBaseUrl: "https://telegram.example/api",
+      timeoutMs: 1000,
+    },
+  };
+}
 
 test("task completion notifications are main interactive agent only", () => {
   assert.equal(shouldNotifyTaskCompletion({ hasUI: true }, {}, ["node", "pi"]), true);
@@ -127,6 +146,54 @@ test("task completion notification answer is extracted from the last assistant m
     { role: "assistant", content: [{ type: "text", text: "final answer" }] },
   ]), "final answer");
   assert.equal(getTaskCompletionNotificationAnswer([{ role: "user", content: "hi" }]), undefined);
+});
+
+test("error task completion notifications are coalesced before sending", async () => {
+  const state: TaskCompletionNotificationCoalescingState = { taskCompletionErrorNotificationTimer: null };
+  const sent: Array<{ status: TaskCompletionNotificationStatus; answer?: string }> = [];
+  const send = (status: TaskCompletionNotificationStatus, _channels: NotificationChannelsConfig, answer?: string) => {
+    sent.push({ status, answer });
+  };
+
+  try {
+    notifyTaskCompleteCoalesced(state, "error", disabledNotificationChannels(), "first error", { errorDelayMs: 5, send });
+    notifyTaskCompleteCoalesced(state, "error", disabledNotificationChannels(), "second error", { errorDelayMs: 5, send });
+
+    assert.deepEqual(sent, []);
+    await wait(20);
+
+    assert.deepEqual(sent, [{ status: "error", answer: "second error" }]);
+    assert.equal(state.taskCompletionErrorNotificationTimer, null);
+  } finally {
+    clearPendingTaskCompletionErrorNotification(state);
+  }
+});
+
+test("completed and aborted task completion results clear pending error notifications", async () => {
+  const state: TaskCompletionNotificationCoalescingState = { taskCompletionErrorNotificationTimer: null };
+  const sent: Array<{ status: TaskCompletionNotificationStatus; answer?: string }> = [];
+  const send = (status: TaskCompletionNotificationStatus, _channels: NotificationChannelsConfig, answer?: string) => {
+    sent.push({ status, answer });
+  };
+
+  try {
+    notifyTaskCompleteCoalesced(state, "error", disabledNotificationChannels(), "failed", { errorDelayMs: 20, send });
+    notifyTaskCompleteCoalesced(state, "completed", disabledNotificationChannels(), "done", { errorDelayMs: 20, send });
+
+    assert.deepEqual(sent, [{ status: "completed", answer: "done" }]);
+    assert.equal(state.taskCompletionErrorNotificationTimer, null);
+    await wait(30);
+    assert.deepEqual(sent, [{ status: "completed", answer: "done" }]);
+
+    notifyTaskCompleteCoalesced(state, "error", disabledNotificationChannels(), "failed again", { errorDelayMs: 20, send });
+    notifyTaskCompleteCoalesced(state, "aborted", disabledNotificationChannels(), "stopped", { errorDelayMs: 20, send });
+
+    assert.equal(state.taskCompletionErrorNotificationTimer, null);
+    await wait(30);
+    assert.deepEqual(sent, [{ status: "completed", answer: "done" }]);
+  } finally {
+    clearPendingTaskCompletionErrorNotification(state);
+  }
 });
 
 test("Telegram task completion notification sends through configured channel", async () => {

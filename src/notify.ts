@@ -10,6 +10,7 @@ const TASK_ERROR_NOTIFICATION_TEXT = "任务出错，请回到本地查看详情
 const WINDOWS_TOAST_APP_ID = "Pi Agent";
 const WINDOWS_TOAST_BODY_LIMIT = 240;
 const TELEGRAM_MESSAGE_LIMIT = 4096;
+export const TASK_ERROR_NOTIFICATION_COALESCE_DELAY_MS = 10_000;
 
 const SUBAGENT_ENV_KEYS = [
   "PI_SUBAGENT_CHILD",
@@ -53,6 +54,21 @@ type AssistantLikeMessage = {
   text?: unknown;
   message?: unknown;
 };
+
+export interface TaskCompletionNotificationCoalescingState {
+  taskCompletionErrorNotificationTimer: ReturnType<typeof setTimeout> | null;
+}
+
+export type TaskCompletionNotificationSender = (
+  status: TaskCompletionNotificationStatus,
+  channels: NotificationChannelsConfig,
+  answer?: string,
+) => void;
+
+export interface TaskCompletionNotificationCoalescingOptions {
+  errorDelayMs?: number;
+  send?: TaskCompletionNotificationSender;
+}
 
 let telegramProxyAgent: EnvHttpProxyAgent | undefined;
 
@@ -302,4 +318,39 @@ export function notifyTaskComplete(
   if (!shouldSendTaskCompletionNotification(status)) return;
   if (channels.windowsToast.enabled) notifyTaskCompleteWindows(status, answer);
   if (channels.telegram.enabled) void notifyTaskCompleteTelegram(status, channels.telegram, answer);
+}
+
+export function clearPendingTaskCompletionErrorNotification(
+  state: TaskCompletionNotificationCoalescingState,
+): void {
+  if (!state.taskCompletionErrorNotificationTimer) return;
+  clearTimeout(state.taskCompletionErrorNotificationTimer);
+  state.taskCompletionErrorNotificationTimer = null;
+}
+
+export function notifyTaskCompleteCoalesced(
+  state: TaskCompletionNotificationCoalescingState,
+  status: TaskCompletionNotificationStatus = "completed",
+  channels: NotificationChannelsConfig,
+  answer?: string,
+  options: TaskCompletionNotificationCoalescingOptions = {},
+): void {
+  const send = options.send ?? notifyTaskComplete;
+
+  if (!shouldSendTaskCompletionNotification(status)) {
+    clearPendingTaskCompletionErrorNotification(state);
+    return;
+  }
+
+  if (status !== "error") {
+    clearPendingTaskCompletionErrorNotification(state);
+    send(status, channels, answer);
+    return;
+  }
+
+  clearPendingTaskCompletionErrorNotification(state);
+  state.taskCompletionErrorNotificationTimer = setTimeout(() => {
+    state.taskCompletionErrorNotificationTimer = null;
+    send(status, channels, answer);
+  }, Math.max(0, options.errorDelayMs ?? TASK_ERROR_NOTIFICATION_COALESCE_DELAY_MS));
 }

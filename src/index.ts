@@ -17,7 +17,14 @@ import {
   patchClaudeCodeCompatPayload,
   patchCodexCompatPayload,
 } from "./provider-compat.ts";
-import { getTaskCompletionNotificationAnswer, getTaskCompletionNotificationStatus, notifyTaskComplete, shouldNotifyTaskCompletion } from "./notify.ts";
+import {
+  createContinueFailureSnapshot,
+  createContinueRequestId,
+  createContinueTriggerMessage,
+  filterContinueContext,
+  findLastContinuableAssistantError,
+} from "./continue-mode.ts";
+import { getTaskCompletionNotificationAnswer, getTaskCompletionNotificationStatus, notifyTaskCompleteCoalesced, shouldNotifyTaskCompletion } from "./notify.ts";
 import { showAgentKitSettingsPanel } from "./settings-panel.ts";
 import { createPluginState, resetPluginState, cleanupPluginState } from "./plugin-state.ts";
 import type { PluginState } from "./plugin-state.ts";
@@ -242,6 +249,43 @@ export default function agentKitPlugin(pi: ExtensionAPI) {
     notify(ctx, formatFastStatusMessage(state.fastDesired, activeModel(ctx, state.currentModelRef), config.fast.supportedModels, config.fast.serviceTier), "info");
   }
 
+  /**
+   * 处理失败恢复命令
+   */
+  async function handleContinueCommand(_args: string | string[], ctx: any): Promise<void> {
+    if (typeof ctx?.isIdle === "function" && !ctx.isIdle()) {
+      notify(ctx, "Pi Agent is still running. Wait for it to stop before using /continue.", "warning");
+      return;
+    }
+
+    if (state.pendingContinueRequest) {
+      notify(ctx, "A /continue retry is already pending for the last failure.", "warning");
+      return;
+    }
+
+    const failure = state.lastContinueFailure;
+    if (!failure) {
+      notify(ctx, "No failed assistant response is available to continue.", "info");
+      return;
+    }
+
+    if (typeof pi.sendMessage !== "function") {
+      notify(ctx, "This Pi Agent version does not expose extension-triggered messages for /continue.", "error");
+      return;
+    }
+
+    const requestId = createContinueRequestId();
+    state.pendingContinueRequest = {
+      id: requestId,
+      failureFingerprint: failure.fingerprint,
+      startedAt: Date.now(),
+      contextApplied: false,
+    };
+
+    pi.sendMessage(createContinueTriggerMessage(requestId, failure.fingerprint), { triggerTurn: true });
+    notify(ctx, "Continuing from the last failed assistant response...", "info");
+  }
+
   // 注册标志
   pi.registerFlag?.("fast", {
     description: "Start with fast mode enabled for allow-listed OpenAI-compatible models",
@@ -250,6 +294,20 @@ export default function agentKitPlugin(pi: ExtensionAPI) {
   });
 
   // 注册事件处理器
+  pi.on("context", (event) => {
+    const pending = state.pendingContinueRequest;
+    if (!pending || pending.contextApplied) return undefined;
+
+    const result = filterContinueContext(event.messages, {
+      requestId: pending.id,
+      failureFingerprint: pending.failureFingerprint,
+    });
+    if (!result.removedFailure && !result.removedTrigger) return undefined;
+
+    state.pendingContinueRequest = { ...pending, contextApplied: true };
+    return { messages: result.messages as typeof event.messages };
+  });
+
   pi.on("before_provider_request", (event, ctx) => {
     state.currentModelRef = activeModel(ctx, state.currentModelRef);
     const fastPayload = patchFastPayload(event.payload, {
@@ -318,8 +376,14 @@ export default function agentKitPlugin(pi: ExtensionAPI) {
   });
 
   pi.on("agent_end", async (event, ctx) => {
+    const failedAssistant = findLastContinuableAssistantError(event.messages);
+    const failureSnapshot = createContinueFailureSnapshot(failedAssistant);
+    state.lastContinueFailure = failureSnapshot ?? null;
+    state.pendingContinueRequest = null;
+
     if (shouldNotifyTaskCompletion(ctx)) {
-      notifyTaskComplete(
+      notifyTaskCompleteCoalesced(
+        state,
         getTaskCompletionNotificationStatus(event.messages),
         config.notificationChannels,
         getTaskCompletionNotificationAnswer(event.messages),
@@ -353,6 +417,13 @@ export default function agentKitPlugin(pi: ExtensionAPI) {
     description: "Toggle OpenAI priority fast mode for allow-listed custom provider models",
     handler: async (args, ctx) => {
       await handleFastCommand(args, ctx);
+    },
+  });
+
+  pi.registerCommand("continue", {
+    description: "Retry from the last failed assistant response",
+    handler: async (args, ctx) => {
+      await handleContinueCommand(args, ctx);
     },
   });
 }
