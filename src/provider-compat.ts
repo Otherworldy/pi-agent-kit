@@ -198,23 +198,6 @@ function withOpenAIMessagesSystemIdentity(
   };
 }
 
-function withMetadataUserId(
-  payload: Record<string, unknown>,
-  metadataUserId: string,
-): Record<string, unknown> | undefined {
-  if (!metadataUserId) return undefined;
-
-  const metadata = isRecord(payload.metadata) ? payload.metadata : {};
-  if (metadata.user_id === metadataUserId) return undefined;
-  return {
-    ...payload,
-    metadata: {
-      ...metadata,
-      user_id: metadataUserId,
-    },
-  };
-}
-
 export function patchClaudeCodeCompatPayload(
   payload: unknown,
   options: {
@@ -224,32 +207,16 @@ export function patchClaudeCodeCompatPayload(
 ): unknown | undefined {
   const { config, model } = options;
   if (!supportsClaudeCodeCompat(model, config) || !isRecord(payload)) return undefined;
+  if (!config.systemIdentity) return undefined;
 
-  let nextPayload: Record<string, unknown> = payload;
-  let changed = false;
+  const systemText = config.systemText.trim();
+  if (!systemText) return undefined;
 
-  const withMetadata = withMetadataUserId(nextPayload, config.metadataUserId.trim());
-  if (withMetadata) {
-    nextPayload = withMetadata;
-    changed = true;
-  }
-
-  if (config.systemIdentity) {
-    const systemText = config.systemText.trim();
-    if (systemText) {
-      const withSystem = model?.api === "anthropic-messages" || hasOwn(nextPayload, "system")
-        ? withNativeAnthropicSystemIdentity(nextPayload, systemText)
-        : hasOwn(nextPayload, "messages")
-          ? withOpenAIMessagesSystemIdentity(nextPayload, "messages", systemText)
-          : withOpenAIMessagesSystemIdentity(nextPayload, "input", systemText);
-      if (withSystem) {
-        nextPayload = withSystem;
-        changed = true;
-      }
-    }
-  }
-
-  return changed ? nextPayload : undefined;
+  return model?.api === "anthropic-messages" || hasOwn(payload, "system")
+    ? withNativeAnthropicSystemIdentity(payload, systemText)
+    : hasOwn(payload, "messages")
+      ? withOpenAIMessagesSystemIdentity(payload, "messages", systemText)
+      : withOpenAIMessagesSystemIdentity(payload, "input", systemText);
 }
 
 function isOpenAIResponsesPayload(payload: Record<string, unknown>, model: ProviderCompatModelLike | null | undefined): boolean {
@@ -259,44 +226,28 @@ function isOpenAIResponsesPayload(payload: Record<string, unknown>, model: Provi
     || hasOwn(payload, "instructions");
 }
 
-function stableCompatId(seed: string): string {
-  let hash = 2166136261;
-  for (let i = 0; i < seed.length; i += 1) {
-    hash ^= seed.charCodeAt(i);
-    hash = Math.imul(hash, 16777619) >>> 0;
-  }
-  return [
-    hash.toString(16).padStart(8, "0"),
-    "0000",
-    "4000",
-    "8000",
-    "000000000000",
-  ].join("-");
-}
-
-function getCodexSessionId(config: CodexCompatConfig): string {
-  return config.metadataUserId.trim() || config.promptCacheKey.trim() || "pi-agent";
-}
-
-function getCodexPromptCacheKey(config: CodexCompatConfig, sessionId: string): string {
-  return config.promptCacheKey.trim() || sessionId;
+function getCodexPromptCacheKey(
+  payload: Record<string, unknown> | undefined,
+  sessionId: string,
+): string {
+  const existing = payload?.prompt_cache_key;
+  return (typeof existing === "string" ? existing.trim() : "") || sessionId;
 }
 
 function withCodexHeaders(
   headers: Record<string, string>,
   sessionId: string,
-  promptCacheKey: string,
   model: ProviderCompatModelLike | null | undefined,
 ): Record<string, string> {
   const nextHeaders = { ...headers };
-  if (!nextHeaders.Session_id) nextHeaders.Session_id = promptCacheKey;
+  if (!nextHeaders.Session_id) nextHeaders.Session_id = sessionId;
   if (!nextHeaders["X-Codex-Turn-Metadata"]) {
     const metadata: Record<string, unknown> = {
       session_id: sessionId,
-      thread_id: promptCacheKey,
+      thread_id: sessionId,
       turn_id: randomUUID(),
       request_kind: "turn",
-      window_id: stableCompatId(`${promptCacheKey}:0`),
+      window_id: `${sessionId}:0`,
       sandbox: "none",
       turn_started_at_unix_ms: Date.now(),
     };
@@ -308,11 +259,10 @@ function withCodexHeaders(
 
 export function getCodexCompatHeaders(
   config: CodexCompatConfig,
+  sessionId: string,
   model?: ProviderCompatModelLike | null | undefined,
 ): Record<string, string> {
-  const sessionId = getCodexSessionId(config);
-  const promptCacheKey = getCodexPromptCacheKey(config, sessionId);
-  return withCodexHeaders(config.headers, sessionId, promptCacheKey, model);
+  return withCodexHeaders(config.headers, sessionId, model);
 }
 
 function withCodexInstructions(
@@ -335,10 +285,9 @@ function withCodexInstructions(
 function withCodexPayloadDefaults(
   payload: Record<string, unknown>,
   config: CodexCompatConfig,
+  sessionId: string,
 ): Record<string, unknown> | undefined {
-  const sessionId = getCodexSessionId(config);
-  const promptCacheKey = getCodexPromptCacheKey(config, sessionId);
-  const clientMetadata = isRecord(payload.client_metadata) ? payload.client_metadata : {};
+  const promptCacheKey = getCodexPromptCacheKey(payload, sessionId);
 
   let nextPayload: Record<string, unknown> = payload;
   let changed = false;
@@ -350,17 +299,6 @@ function withCodexPayloadDefaults(
 
   if (payload.store !== config.store) {
     nextPayload = { ...nextPayload, store: config.store };
-    changed = true;
-  }
-
-  if (clientMetadata["x-codex-installation-id"] !== sessionId) {
-    nextPayload = {
-      ...nextPayload,
-      client_metadata: {
-        ...clientMetadata,
-        "x-codex-installation-id": sessionId,
-      },
-    };
     changed = true;
   }
 
@@ -377,9 +315,10 @@ export function patchCodexCompatPayload(
   options: {
     config: CodexCompatConfig;
     model: ProviderCompatModelLike | null | undefined;
+    sessionId: string;
   },
 ): unknown | undefined {
-  const { config, model } = options;
+  const { config, model, sessionId } = options;
   if (!supportsCodexCompat(model, config) || !isRecord(payload) || !isOpenAIResponsesPayload(payload, model)) {
     return undefined;
   }
@@ -387,7 +326,7 @@ export function patchCodexCompatPayload(
   let nextPayload: Record<string, unknown> = payload;
   let changed = false;
 
-  const defaultsPayload = withCodexPayloadDefaults(nextPayload, config);
+  const defaultsPayload = withCodexPayloadDefaults(nextPayload, config, sessionId);
   if (defaultsPayload) {
     nextPayload = defaultsPayload;
     changed = true;

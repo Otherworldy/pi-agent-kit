@@ -14,13 +14,11 @@ export interface ProviderCompatConfig {
   providers: string[];
   supportedModels: string[];
   headers: Record<string, string>;
-  metadataUserId: string;
   systemIdentity: boolean;
   systemText: string;
 }
 
 export interface CodexCompatConfig extends ProviderCompatConfig {
-  promptCacheKey: string;
   store: boolean;
 }
 
@@ -151,7 +149,6 @@ const DEFAULT_CONFIG: AgentKitConfig = {
     providers: [],
     supportedModels: [],
     headers: { ...DEFAULT_CLAUDE_CODE_COMPAT_HEADERS },
-    metadataUserId: "pi-agent",
     systemIdentity: true,
     systemText: DEFAULT_CLAUDE_CODE_SYSTEM_TEXT,
   },
@@ -160,10 +157,8 @@ const DEFAULT_CONFIG: AgentKitConfig = {
     providers: [],
     supportedModels: [],
     headers: { ...DEFAULT_CODEX_COMPAT_HEADERS },
-    metadataUserId: "pi-agent",
     systemIdentity: false,
     systemText: DEFAULT_CODEX_SYSTEM_TEXT,
-    promptCacheKey: "pi-agent",
     store: false,
   },
 };
@@ -370,7 +365,6 @@ function parseProviderCompatConfig(
     providers: [...defaults.providers],
     supportedModels: [...defaults.supportedModels],
     headers: stringRecordFromObject(rawConfig, "headers", headers),
-    metadataUserId: stringFromObject(rawConfig, "metadataUserId", defaults.metadataUserId),
     systemIdentity: boolFromObject(rawConfig, "systemIdentity") ?? defaults.systemIdentity,
     systemText: stringFromObject(rawConfig, "systemText", defaults.systemText),
   };
@@ -386,7 +380,6 @@ function parseCodexCompatConfig(
 
   return {
     ...base,
-    promptCacheKey: stringFromObject(rawConfig, "promptCacheKey", DEFAULT_CONFIG.codexCompat.promptCacheKey),
     store: boolFromObject(rawConfig, "store") ?? DEFAULT_CONFIG.codexCompat.store,
   };
 }

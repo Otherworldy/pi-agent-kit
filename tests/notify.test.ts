@@ -92,6 +92,7 @@ test("task completion notifications, editor chrome, and fast defaults are config
   assert.equal(parseAgentKitConfig({}).providerCompat.enabled, true);
   assert.equal(parseAgentKitConfig({}).claudeCodeCompat.enabled, true);
   assert.equal(parseAgentKitConfig({}).codexCompat.enabled, true);
+  assert.equal(parseAgentKitConfig({}).codexCompat.store, false);
   const providerCompatConfig = parseAgentKitConfig({
     agentKit: {
       providerCompat: {

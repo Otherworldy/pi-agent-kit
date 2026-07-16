@@ -236,7 +236,7 @@ function createHarness(cwd: string, options: { synchronousEditorComponent?: bool
     cwd,
     ui,
     model: { contextWindow: 200000, id: "gpt-5.5", provider: "my-openai", api: "openai-responses" },
-    sessionManager: { getEntries: () => [] },
+    sessionManager: { getEntries: () => [], getSessionId: () => "test-session-id" },
     modelRegistry: { providerRequestConfigs: new Map<string, unknown>() },
     getContextUsage: () => ({ contextWindow: 200000, percent: 42, tokens: 84000 }),
     isIdle: () => idle,
@@ -737,7 +737,6 @@ test("provider compat switch auto-registers Claude Code headers and patches Clau
         { role: "system", content: "You are Claude Code, Anthropic's official CLI for Claude." },
         { role: "user", content: "hi" },
       ],
-      metadata: { user_id: "pi-agent" },
     });
   });
 });
@@ -758,8 +757,11 @@ test("provider compat switch auto-registers Codex headers and patches responses 
     assert.equal(providerConfig.headers["User-Agent"], "codex_cli_rs/test");
     assert.equal(providerConfig.headers["OpenAI-Beta"], "responses=experimental");
     assert.equal(providerConfig.headers["X-Codex-Beta-Features"], "remote_compaction_v2");
-    assert.equal(providerConfig.headers.Session_id, "pi-agent");
+    assert.equal(providerConfig.headers.Session_id, "test-session-id");
     const sessionMetadata = readTurnMetadata();
+    assert.equal(sessionMetadata.session_id, "test-session-id");
+    assert.equal(sessionMetadata.thread_id, "test-session-id");
+    assert.equal(sessionMetadata.window_id, "test-session-id:0");
     assert.equal(sessionMetadata.model, "gpt-5.5");
     assert.equal(harness.statuses.get("agent-kit-codex"), "Codex compat");
 
@@ -777,14 +779,15 @@ test("provider compat switch auto-registers Codex headers and patches responses 
       payload: {
         model: "gpt-5.5",
         input: [{ role: "user", content: "hi" }],
+        client_metadata: { "x-codex-installation-id": "real-installation-id" },
       },
     }), {
       model: "gpt-5.5",
       input: [{ role: "user", content: "hi" }],
-      prompt_cache_key: "pi-agent",
+      client_metadata: { "x-codex-installation-id": "real-installation-id" },
+      prompt_cache_key: "test-session-id",
       store: false,
       instructions: "",
-      client_metadata: { "x-codex-installation-id": "pi-agent" },
     });
   });
 });

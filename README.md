@@ -81,7 +81,7 @@ The fixed editor keeps the input cluster at the bottom of the terminal while cha
 
 ## Task completion notification
 
-On native Windows, and on Windows 11 WSL with `powershell.exe`/WSL interop available, the extension can send a local toast notification when the main interactive Pi Agent finishes a task. Telegram push can also be enabled as an additional notification channel. Successful tasks send the final assistant answer, errors send a fixed failure message, and user-aborted tasks do not send a notification.
+On native Windows, and on Windows 11 WSL with `powershell.exe`/WSL interop available, the extension can send a local toast notification when the main interactive Pi Agent finishes a task. Telegram push can also be enabled as an additional notification channel. Successful tasks send the final assistant answer, errors send a fixed failure message, and user-aborted tasks do not send a notification. Error notifications are delayed briefly and coalesced so short retry bursts produce one failure notification instead of one per failed attempt.
 
 Subagent processes are skipped via the `PI_SUBAGENT_*` environment markers used by `pi-subagents`, with a JSON print-mode fallback guard. Local and Telegram notifications can be enabled separately in `/agent-kit`. If no toast appears in WSL, check `command -v powershell.exe` and Windows notification / Do Not Disturb settings.
 
@@ -102,6 +102,16 @@ To enable Telegram, create a bot with `@BotFather`, send it `/start`, and config
 ```
 
 You can also set `apiBaseUrl` and `timeoutMs` under `notificationChannels.telegram`.
+
+## Continue after failure
+
+```text
+/continue
+```
+
+When the most recent agent run stopped on an assistant/provider error, `/continue` starts one manual retry from just before the failed assistant response. It hides the failed assistant error and the extension's internal trigger message from the next model request, so the model sees the conversation at the failure point again.
+
+`/continue` is only available after an error stop. If there is no failed assistant response to continue, if Pi Agent is still running, or if a continue request is already pending, the command shows a notice and does not start another turn. User-aborted runs are not retried.
 
 ## Fast mode
 
@@ -136,7 +146,7 @@ Some Claude/NewAPI-compatible gateways validate that requests look like Claude C
 }
 ```
 
-Claude-like models automatically receive Claude Code headers and payload patching (`metadata.user_id` plus the Claude Code identity system text). Codex/OpenAI-compatible models automatically receive Codex CLI headers (`Originator`, `Session_id`, `User-Agent`, `OpenAI-Beta`, `X-Codex-Beta-Features`, and `X-Codex-Turn-Metadata`); OpenAI Responses-like models also receive Responses payload patching (`prompt_cache_key`, `store`, `instructions`, and `client_metadata.x-codex-installation-id`). Existing provider headers are preserved and compatibility headers override duplicates while the plugin-page switch is on. Run `/fast reload` after editing header overrides to reload fast mode and provider compatibility settings without changing the plugin-page switch state.
+Claude-like models automatically receive Claude Code headers and the Claude Code identity system text. Codex/OpenAI-compatible models automatically receive Codex CLI headers (`Originator`, `Session_id`, `User-Agent`, `OpenAI-Beta`, `X-Codex-Beta-Features`, and `X-Codex-Turn-Metadata`); session fields and a missing Responses `prompt_cache_key` use Pi's real session ID. Existing payload IDs, including `client_metadata.x-codex-installation-id`, are preserved rather than replaced with placeholders. Existing provider headers are preserved and compatibility headers override duplicates while the plugin-page switch is on. Run `/fast reload` after editing header overrides to reload fast mode and provider compatibility settings without changing the plugin-page switch state.
 
 Nested header config is also accepted if you prefer grouping by profile:
 

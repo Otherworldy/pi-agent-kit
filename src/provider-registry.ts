@@ -73,6 +73,7 @@ export function registerProviderCompatProviders(
   codexProviders: Set<string>;
 } {
   const model = activeModel(ctx, currentModelRef);
+  const sessionId = ctx.sessionManager.getSessionId();
   const claudeProviders = new Set(getClaudeCodeCompatProviderNames(config.claudeCodeCompat, model));
   const codexProviders = new Set(getCodexCompatProviderNames(config.codexCompat, model));
   const providers = new Set([...claudeProviders, ...codexProviders]);
@@ -89,7 +90,7 @@ export function registerProviderCompatProviders(
       headers: {
         ...previousConfig?.headers,
         ...(claudeProviders.has(provider) ? config.claudeCodeCompat.headers : {}),
-        ...(codexProviders.has(provider) ? getCodexCompatHeaders(config.codexCompat, model) : {}),
+        ...(codexProviders.has(provider) ? getCodexCompatHeaders(config.codexCompat, sessionId, model) : {}),
       },
     });
   }
