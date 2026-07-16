@@ -1,17 +1,22 @@
 import { execFileSync } from "node:child_process";
-import { homedir } from "node:os";
-import { isAbsolute, relative } from "node:path";
 import type { ThemeColor } from "@earendil-works/pi-coding-agent";
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 
 const GIT_CACHE_MS = 2000;
 const MIN_CHROME_WIDTH = 16;
-const BODY_HORIZONTAL_PADDING = 0;
-const BODY_VERTICAL_PADDING = 1;
-const RIGHT_LABEL_MAX_RATIO = 0.58;
+const BODY_TOP_PADDING = 1;
+const BODY_META_GAP = 1; // gap between input body and bottom meta
+const PANEL_BOTTOM_PADDING = 1; // gap under meta before panel edge
+const PAD_X = 1; // equal inset after left bar / before right edge
+const LEFT_BAR = "▌";
+// Solid mid-gray panel when theme bg is unavailable.
+const FALLBACK_PANEL_BG_ANSI = "\x1b[48;2;51;51;51m";
+const PANEL_BG_KEYS = ["selectedBg", "userMessageBg"] as const;
 
 type ThemeLike = {
   fg?: (color: ThemeColor, text: string) => string;
+  bg?: (color: never, text: string) => string;
+  getBgAnsi?: (color: never) => string;
 };
 
 export interface EditorChromeContextLike {
@@ -28,6 +33,9 @@ export interface EditorChromeRenderInput {
   thinkingLevel: string;
   providerCompatLabel?: string;
   fastLabel?: string;
+  showGitStatus?: boolean;
+  /** Left-outside working label, e.g. "⠋ working". Empty when idle. */
+  workingLabel?: string;
   borderColor?: (text: string) => string;
   renderBase: (width: number) => string[];
 }
@@ -134,6 +142,25 @@ function fg(theme: ThemeLike | undefined, color: ThemeColor, text: string): stri
   }
 }
 
+function panelBgOpen(theme: ThemeLike | undefined): string {
+  for (const key of PANEL_BG_KEYS) {
+    try {
+      const ansi = theme?.getBgAnsi?.(key as never);
+      if (ansi && ansi !== "\x1b[49m") return ansi;
+    } catch {
+      // try next / fallback
+    }
+  }
+  return FALLBACK_PANEL_BG_ANSI;
+}
+
+// Full-line panel fill. Re-open bg after full SGR resets (editor cursor uses \x1b[0m).
+function withPanelBg(theme: ThemeLike | undefined, text: string): string {
+  const open = panelBgOpen(theme);
+  const repaired = text.replace(/\x1b\[0m/g, `\x1b[0m${open}`);
+  return `${open}${repaired}\x1b[49m`;
+}
+
 function thinkingColor(level: string): ThemeColor {
   switch (level) {
     case "minimal":
@@ -174,24 +201,8 @@ function modelChromeLabel(context: EditorChromeContextLike): string {
   return context.model?.provider ? `${context.model.provider}/${modelId}` : modelId;
 }
 
-function compactPath(cwd: string): string {
-  const home = homedir();
-  if (cwd === home) return "~";
-
-  const homeRelative = relative(home, cwd);
-  if (homeRelative && !homeRelative.startsWith("..") && !isAbsolute(homeRelative)) {
-    return `~/${homeRelative.replaceAll("\\", "/")}`;
-  }
-
-  return cwd;
-}
-
-function rightLabelMaxWidth(innerWidth: number): number {
-  return Math.max(0, Math.floor(innerWidth * RIGHT_LABEL_MAX_RATIO));
-}
-
 function formatGitLabel(theme: ThemeLike | undefined, git: GitInfo, maxWidth: number): string {
-  const contentWidth = Math.max(0, maxWidth - 2);
+  const contentWidth = Math.max(0, maxWidth);
   if (contentWidth === 0) return "";
 
   if (!git.isRepository) return "";
@@ -211,35 +222,20 @@ function formatGitLabel(theme: ThemeLike | undefined, git: GitInfo, maxWidth: nu
     ].filter(Boolean).join(" ");
 
   const fullLabel = branch ? `${branch}${separator}${fullStatus}` : fullStatus;
-  if (visibleWidth(fullLabel) <= contentWidth) return ` ${fullLabel} `;
+  if (visibleWidth(fullLabel) <= contentWidth) return fullLabel;
 
   const compactLabel = branch ? `${branch}${separator}${compactStatus}` : compactStatus;
-  if (visibleWidth(compactLabel) <= contentWidth) return ` ${compactLabel} `;
+  if (visibleWidth(compactLabel) <= contentWidth) return compactLabel;
 
   if (branch) {
     const branchWidth = contentWidth - visibleWidth(separator) - visibleWidth(compactStatus);
-    if (branchWidth > 0) return ` ${truncateToWidth(branch, branchWidth, "…")}${separator}${compactStatus} `;
+    if (branchWidth > 0) return `${truncateToWidth(branch, branchWidth, "…")}${separator}${compactStatus}`;
   }
 
-  if (visibleWidth(fullStatus) <= contentWidth) return ` ${fullStatus} `;
-  if (visibleWidth(compactStatus) <= contentWidth) return ` ${compactStatus} `;
+  if (visibleWidth(fullStatus) <= contentWidth) return fullStatus;
+  if (visibleWidth(compactStatus) <= contentWidth) return compactStatus;
 
-  return ` ${truncateToWidth(compactStatus, contentWidth, "…")} `;
-}
-
-function horizontalRuleWithLabels(
-  width: number,
-  leftLabel: string,
-  rightLabel: string,
-  borderColor: (text: string) => string,
-): string {
-  const innerWidth = Math.max(0, width - 2);
-  const maxRight = rightLabelMaxWidth(innerWidth);
-  const right = truncateToWidth(rightLabel, maxRight, "…");
-  const left = truncateToWidth(leftLabel, Math.max(0, innerWidth - visibleWidth(right) - 1), "…");
-  const fill = Math.max(0, innerWidth - visibleWidth(left) - visibleWidth(right));
-
-  return borderColor("─") + left + borderColor("─".repeat(fill)) + right + borderColor("─");
+  return truncateToWidth(compactStatus, contentWidth, "…");
 }
 
 function padLine(line: string, width: number): string {
@@ -247,9 +243,8 @@ function padLine(line: string, width: number): string {
   return clipped + " ".repeat(Math.max(0, width - visibleWidth(clipped)));
 }
 
-function blankBodyLine(width: number): string {
-  return " ".repeat(Math.max(0, width));
-}
+// Shared light tone for model / ctx / provider-compat meta items.
+const META_LIGHT: ThemeColor = "muted";
 
 function formatContextUsage(context: EditorChromeContextLike, theme: ThemeLike | undefined): string {
   try {
@@ -259,80 +254,124 @@ function formatContextUsage(context: EditorChromeContextLike, theme: ThemeLike |
     const percent = Math.max(0, Math.round(usage.percent));
     const contextWindow = usage.contextWindow ?? context.model?.contextWindow;
     const suffix = contextWindow ? `/${Math.round(contextWindow / 1000)}k` : "";
-    return fg(theme, "muted", `ctx ${percent}%${suffix}`);
+    return fg(theme, META_LIGHT, `ctx ${percent}%${suffix}`);
   } catch {
     return "";
   }
 }
 
-function buildTopLabels(
+function buildMetaLine(
   context: EditorChromeContextLike,
   thinkingLevel: string,
   width: number,
   providerCompatLabel?: string,
   fastLabel?: string,
-): { left: string; right: string } {
+): string {
   const theme = context.ui?.theme;
-  const cwd = context.cwd ?? process.cwd();
-  const innerWidth = Math.max(0, width - 2);
-  const maxRight = rightLabelMaxWidth(innerWidth);
-  const git = formatGitLabel(theme, getGitInfo(cwd), maxRight);
-  const modelLabel = modelChromeLabel(context);
-  const gitWidth = Math.min(visibleWidth(git), maxRight);
+  const separator = fg(theme, "dim", " · ");
+
   const thinkingText = thinkingLevel || "off";
-  const thinking = fg(theme, thinkingColor(thinkingText), thinkingText);
-  const providerCompat = providerCompatLabel ? fg(theme, providerCompatLabel.includes("*") ? "warning" : "accent", providerCompatLabel) : "";
+  const thinking = thinkingText === "off"
+    ? ""
+    : fg(theme, thinkingColor(thinkingText), thinkingText);
+  // Model / ctx / header-compat share the same light theme color.
+  const providerCompat = providerCompatLabel ? fg(theme, META_LIGHT, providerCompatLabel) : "";
   const fast = fastLabel ? fg(theme, fastLabel.includes("*") ? "warning" : "accent", fastLabel) : "";
   const contextUsage = formatContextUsage(context, theme);
-  const separator = fg(theme, "dim", " · ");
-  const fixedParts = [thinking, providerCompat, fast, contextUsage].filter(Boolean);
-  const fixedWidth = fixedParts.reduce((total, part) => total + visibleWidth(part), 0);
-  const separatorWidth = visibleWidth(separator) * fixedParts.length;
-  const modelMaxWidth = Math.max(1, innerWidth - gitWidth - fixedWidth - separatorWidth - 3);
-  const model = fg(theme, "text", compactModelId(modelLabel, modelMaxWidth));
-  const leftParts = [model, ...fixedParts];
 
-  return {
-    left: ` ${leftParts.join(separator)} `,
-    right: git,
-  };
+  const optional = [thinking, providerCompat, fast, contextUsage].filter(Boolean);
+  let extras = [...optional];
+  const modelLabel = modelChromeLabel(context);
+  const pack = (modelText: string, parts: string[]) => [modelText, ...parts].filter(Boolean).join(separator);
+
+  let model = fg(theme, META_LIGHT, compactModelId(modelLabel, Math.max(1, width)));
+  let left = pack(model, extras);
+  while (extras.length > 0 && visibleWidth(left) > width) {
+    extras = extras.slice(0, -1);
+    left = pack(model, extras);
+  }
+  if (visibleWidth(left) > width) {
+    model = fg(theme, META_LIGHT, compactModelId(modelLabel, Math.max(1, width)));
+    left = pack(model, []);
+  }
+  if (visibleWidth(left) > width) {
+    left = truncateToWidth(left, width, "…");
+  }
+
+  return padLine(left, width);
 }
 
-function buildBottomLabels(context: EditorChromeContextLike): { left: string; right: string } {
+/** Status row outside the input panel: working (left) · git (right). */
+function buildExternalStatusLine(
+  context: EditorChromeContextLike,
+  width: number,
+  options: { showGitStatus?: boolean; workingLabel?: string },
+): string {
   const theme = context.ui?.theme;
-  const cwd = context.cwd ?? process.cwd();
+  const working = options.workingLabel?.trim() ? options.workingLabel.trim() : "";
+  const git = options.showGitStatus
+    ? formatGitLabel(theme, getGitInfo(context.cwd ?? process.cwd()), width)
+    : "";
 
-  return {
-    left: "",
-    right: fg(theme, "muted", ` ${compactPath(cwd)} `),
-  };
+  if (!working && !git) return "";
+  if (!git) return padLine(working, width);
+  if (!working) {
+    const pad = Math.max(0, width - visibleWidth(git));
+    return " ".repeat(pad) + git;
+  }
+
+  const gap = Math.max(1, width - visibleWidth(working) - visibleWidth(git));
+  return padLine(`${working}${" ".repeat(gap)}${git}`, width);
+}
+
+function paintPanelLine(
+  theme: ThemeLike | undefined,
+  thinkingLevel: string,
+  content: string,
+  contentWidth: number,
+): string {
+  const bar = fg(theme, thinkingColor(thinkingLevel || "off"), LEFT_BAR);
+  const pad = " ".repeat(PAD_X);
+  // ▌ | pad | content | pad — equal inset under solid panel bg; no ─ borders
+  return withPanelBg(theme, bar + pad + padLine(content, contentWidth) + pad);
 }
 
 export function renderEditorChrome(input: EditorChromeRenderInput): string[] {
   const width = Math.max(1, Math.floor(input.width));
   if (!input.enabled || !input.context || width < MIN_CHROME_WIDTH) return input.renderBase(input.width);
 
-  const paddingX = width >= BODY_HORIZONTAL_PADDING * 2 + 3 ? BODY_HORIZONTAL_PADDING : 0;
-  const paddingY = BODY_VERTICAL_PADDING;
-  const bodyWidth = Math.max(1, width - paddingX * 2);
-  const baseLines = input.renderBase(bodyWidth);
+  const barWidth = visibleWidth(LEFT_BAR);
+  const contentWidth = Math.max(1, width - barWidth - PAD_X * 2);
+  // Base editor still draws ─ rules; strip them (no chrome ─ borders).
+  const baseLines = input.renderBase(contentWidth);
   const split = splitEditorRender(baseLines);
   if (!split) return input.renderBase(input.width);
 
-  const borderColor = input.borderColor ?? ((text: string) => text);
-  const top = buildTopLabels(input.context, input.thinkingLevel, width, input.providerCompatLabel, input.fastLabel);
-  const bottom = buildBottomLabels(input.context);
-  const bodyPadding = " ".repeat(paddingX);
-  const popupPadding = " ".repeat(paddingX);
-  const wrapBodyLine = (line: string) => `${bodyPadding}${padLine(line, bodyWidth)}${bodyPadding}`;
-  const verticalPadding = Array.from({ length: paddingY }, () => blankBodyLine(width));
+  const theme = input.context.ui?.theme;
+  const thinkingLevel = input.thinkingLevel || "off";
+  const paint = (content: string) => paintPanelLine(theme, thinkingLevel, content, contentWidth);
+  const topPad = Array.from({ length: BODY_TOP_PADDING }, () => paint(""));
+  const metaGap = Array.from({ length: BODY_META_GAP }, () => paint(""));
+  const bottomPad = Array.from({ length: PANEL_BOTTOM_PADDING }, () => paint(""));
+  const meta = buildMetaLine(
+    input.context,
+    thinkingLevel,
+    contentWidth,
+    input.providerCompatLabel,
+    input.fastLabel,
+  );
+  const externalStatus = buildExternalStatusLine(input.context, width, {
+    showGitStatus: input.showGitStatus,
+    workingLabel: input.workingLabel,
+  });
 
   return [
-    horizontalRuleWithLabels(width, top.left, top.right, borderColor),
-    ...verticalPadding,
-    ...split.bodyLines.map(wrapBodyLine),
-    ...verticalPadding,
-    horizontalRuleWithLabels(width, bottom.left, bottom.right, borderColor),
-    ...split.popupLines.map((line) => padLine(`${popupPadding}${line}`, width)),
+    ...topPad,
+    ...split.bodyLines.map((line) => paint(line)),
+    ...metaGap,
+    paint(meta),
+    ...bottomPad,
+    ...(externalStatus ? [externalStatus] : []),
+    ...split.popupLines.map((line) => padLine(line, width)),
   ];
 }

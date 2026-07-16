@@ -58,6 +58,8 @@ test("task completion notifications, editor chrome, and fast defaults are config
   assert.equal(parseAgentKitConfig({ agentKit: { taskCompletionNotification: false } }).taskCompletionNotification, false);
   assert.equal(parseAgentKitConfig({}).editorChrome, true);
   assert.equal(parseAgentKitConfig({ agentKit: { editorChrome: false } }).editorChrome, false);
+  assert.equal(parseAgentKitConfig({}).showGitStatus, true);
+  assert.equal(parseAgentKitConfig({ agentKit: { showGitStatus: false } }).showGitStatus, false);
   assert.equal(parseAgentKitConfig({}).fast.enabled, false);
   assert.equal(parseAgentKitConfig({ agentKit: { fast: { enabled: true, supportedModels: ["my-openai/gpt-5.5"] } } }).fast.supportedModels[0], "my-openai/gpt-5.5");
   assert.equal(parseAgentKitConfig({}).notificationChannels.windowsToast.enabled, true);

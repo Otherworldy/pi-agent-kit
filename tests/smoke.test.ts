@@ -344,6 +344,7 @@ test("plugin exports a default factory and registers lifecycle hooks plus comman
     "session_start",
     "thinking_level_select",
     "model_select",
+    "agent_start",
     "agent_end",
     "session_shutdown",
   ]);
@@ -600,21 +601,27 @@ test("editor chrome renders model, thinking level, context usage, git status, cw
 
     assert.ok(harness.mountedEditor);
     const lines = harness.mountedEditor.render(120);
-    assert.ok(lines[0]?.includes("my-openai/gpt-5.5"));
-    assert.ok(lines[0]?.includes("high"));
-    assert.ok(lines[0]?.includes("Codex"));
-    assert.ok(lines[0]?.includes("ctx 42%/200k"));
-    assert.ok(lines[0]?.includes("main"));
-    assert.match(lines[0] ?? "", /clean|Δ/);
-    assert.ok(lines.at(-1)?.includes("project"));
-    assert.equal(lines[1], " ".repeat(120));
-    assert.equal(lines[2]?.startsWith(" "), true);
-    assert.equal(lines[2]?.endsWith(" "), true);
-    assert.equal(lines[2]?.includes("│"), false);
+    const joined = lines.join("\n");
+    assert.ok(joined.includes("my-openai/gpt-5.5"));
+    assert.ok(joined.includes("high"));
+    assert.ok(joined.includes("Codex"));
+    assert.ok(joined.includes("ctx 42%/200k"));
+    assert.ok(joined.includes(" · "));
+    assert.ok(joined.includes("main"));
+    assert.match(joined, /clean|Δ/);
+    // Solid panel + ▌ thinking bar; no chrome ─ borders
+    assert.ok(lines.some((line: string) => line.includes("▌")));
+    assert.ok(lines.some((line: string) => /\x1b\[48[;:]/.test(line)));
+    assert.equal((lines[0] ?? "").includes("─"), false);
+    // git sits outside the panel (last chrome line, right-aligned, no ▌)
+    const gitLine = [...lines].reverse().find((line: string) => /main/.test(line) && /clean|Δ/.test(line));
+    assert.ok(gitLine);
+    assert.equal(gitLine?.includes("▌"), false);
 
     const narrowLines = harness.mountedEditor.render(40);
-    assert.ok(narrowLines[0]?.includes("main"));
-    assert.match(narrowLines[0] ?? "", /clean|Δ/);
+    const narrowJoined = narrowLines.join("\n");
+    assert.ok(narrowJoined.includes("main"));
+    assert.match(narrowJoined, /clean|Δ/);
   });
 });
 
@@ -659,9 +666,10 @@ test("editor chrome keeps autocomplete popup rows below the custom border", asyn
     await harness.sessionStart({ reason: "new" }, harness.ctx);
 
     const lines = harness.mountedEditor.render(80);
-    assert.equal(lines.at(-2)?.startsWith("─"), true);
-    assert.equal(lines.at(-2)?.includes("╰"), false);
+    // popup is last; chrome lines above it have no box-drawing corners
     assert.match(lines.at(-1) ?? "", /popup/);
+    assert.ok(lines.slice(0, -1).some((line: string) => line.includes("▌")));
+    assert.equal(lines.slice(0, -1).some((line: string) => line.includes("╰")), false);
   });
 });
 
@@ -700,7 +708,7 @@ test("fast command toggles status, editor chrome label, and provider payload", a
     await harness.runCommand("fast", "on");
 
     assert.equal(harness.statuses.get("agent-kit-fast"), "⚡fast");
-    assert.ok(harness.mountedEditor.render(120)[0]?.includes("⚡fast"));
+    assert.ok(harness.mountedEditor.render(120).some((line: string) => line.includes("⚡fast")));
     assert.deepEqual(await harness.emit("before_provider_request", { payload: { model: "gpt-5.5" } }), {
       model: "gpt-5.5",
       service_tier: "priority",

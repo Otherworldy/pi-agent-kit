@@ -1,7 +1,7 @@
 import { CustomEditor } from "@earendil-works/pi-coding-agent";
 import type { PluginState, EditorFactory, AgentKitEditorFactory } from "./plugin-state.ts";
 import type { AgentKitConfig } from "./config.ts";
-import { AGENT_KIT_EDITOR_FACTORY } from "./plugin-state.ts";
+import { AGENT_KIT_EDITOR_FACTORY, workingSpinnerFrame } from "./plugin-state.ts";
 import { renderEditorChrome } from "./editor-chrome.ts";
 import { getFastChromeLabel, getProviderCompatChromeLabel } from "./status-updater.ts";
 import { findContainerWithChild } from "./utils.ts";
@@ -23,16 +23,32 @@ export function wrapEditorFactory(
 
     const originalRender = editor.render?.bind(editor);
     if (originalRender) {
-      editor.render = (width: number) => renderEditorChrome({
-        width,
-        enabled: config.editorChrome,
-        context: state.activeCtxRef,
-        thinkingLevel: state.activeThinkingLevel,
-        providerCompatLabel: getProviderCompatChromeLabel(state.activeCtxRef, state.currentModelRef, config),
-        fastLabel: getFastChromeLabel(state.activeCtxRef, state.currentModelRef, state.fastDesired, config.fast.supportedModels),
-        borderColor: editor.borderColor,
-        renderBase: originalRender,
-      });
+      editor.render = (width: number) => {
+        const theme = state.activeCtxRef?.ui?.theme as { fg?: (color: string, text: string) => string } | undefined;
+        let workingLabel = "";
+        if (state.isWorking) {
+          const bounce = workingSpinnerFrame(state, theme);
+          let text = "esc interrupt";
+          try {
+            text = theme?.fg?.("muted", "esc interrupt") ?? "esc interrupt";
+          } catch {
+            text = "esc interrupt";
+          }
+          workingLabel = `${bounce} ${text}`;
+        }
+        return renderEditorChrome({
+          width,
+          enabled: config.editorChrome,
+          context: state.activeCtxRef,
+          thinkingLevel: state.activeThinkingLevel,
+          providerCompatLabel: getProviderCompatChromeLabel(state.activeCtxRef, state.currentModelRef, config),
+          fastLabel: getFastChromeLabel(state.activeCtxRef, state.currentModelRef, state.fastDesired, config.fast.supportedModels),
+          showGitStatus: config.showGitStatus,
+          workingLabel,
+          borderColor: editor.borderColor,
+          renderBase: originalRender,
+        });
+      };
     }
 
     state.currentEditor = editor;

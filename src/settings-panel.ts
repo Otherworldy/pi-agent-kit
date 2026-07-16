@@ -73,8 +73,15 @@ export class AgentKitSettingsPanel extends Container {
       {
         id: "editorChrome",
         label: "Editor chrome",
-        description: "Show model, thinking level, directory, and git status on the input box borders.",
+        description: "Show model, thinking level, compat, and context on the input panel meta line.",
         currentValue: options.config.editorChrome ? "true" : "false",
+        values: ["true", "false"],
+      },
+      {
+        id: "showGitStatus",
+        label: "Git status",
+        description: "Show git branch and change summary outside the input panel at the bottom-right.",
+        currentValue: options.config.showGitStatus ? "true" : "false",
         values: ["true", "false"],
       },
       {

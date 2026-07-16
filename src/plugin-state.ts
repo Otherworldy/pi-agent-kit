@@ -45,6 +45,11 @@ export interface PluginState {
   // 任务完成通知状态
   taskCompletionErrorNotificationTimer: ReturnType<typeof setTimeout> | null;
 
+  // 输入区外左下角 working 指示
+  isWorking: boolean;
+  workingSpinnerIndex: number;
+  workingSpinnerTimer: ReturnType<typeof setInterval> | null;
+
   // /continue失败恢复状态
   lastContinueFailure: ContinueFailureSnapshot | null;
   pendingContinueRequest: ContinuePendingRequest | null;
@@ -102,9 +107,83 @@ export function createPluginState(): PluginState {
     registeredCodexCompatProviders: new Set(),
     previousCompatProviderConfigs: new Map(),
     taskCompletionErrorNotificationTimer: null,
+    isWorking: false,
+    workingSpinnerIndex: 0,
+    workingSpinnerTimer: null,
     lastContinueFailure: null,
     pendingContinueRequest: null,
   };
+}
+
+export function stopWorkingSpinner(state: PluginState): void {
+  state.isWorking = false;
+  if (state.workingSpinnerTimer) {
+    clearInterval(state.workingSpinnerTimer);
+    state.workingSpinnerTimer = null;
+  }
+}
+
+// Long dual-dot bounce track (● travels L→R→L across dim dots).
+const WORKING_BOUNCE_LEN = 6;
+const WORKING_TICK_MS = 100;
+
+function thinkingFgColor(level: string): string {
+  switch (level) {
+    case "minimal":
+      return "thinkingMinimal";
+    case "low":
+      return "thinkingLow";
+    case "medium":
+      return "thinkingMedium";
+    case "high":
+      return "thinkingHigh";
+    case "xhigh":
+      return "thinkingXhigh";
+    case "off":
+    default:
+      return "thinkingOff";
+  }
+}
+
+/** Build ping-pong frames: ●······· ·●······ … ·······● … ·●······ */
+function bounceFrames(length: number): string[] {
+  const n = Math.max(3, length);
+  const frames: string[] = [];
+  for (let i = 0; i < n; i += 1) {
+    frames.push("∙".repeat(i) + "●" + "∙".repeat(n - 1 - i));
+  }
+  // reverse without duplicating endpoints
+  for (let i = n - 2; i >= 1; i -= 1) {
+    frames.push("∙".repeat(i) + "●" + "∙".repeat(n - 1 - i));
+  }
+  return frames;
+}
+
+const WORKING_BOUNCE_FRAMES = bounceFrames(WORKING_BOUNCE_LEN);
+
+export function startWorkingSpinner(state: PluginState): void {
+  stopWorkingSpinner(state);
+  state.isWorking = true;
+  state.workingSpinnerIndex = 0;
+  state.workingSpinnerTimer = setInterval(() => {
+    state.workingSpinnerIndex = (state.workingSpinnerIndex + 1) % WORKING_BOUNCE_FRAMES.length;
+    state.fixedEditorCompositor?.requestRepaint();
+    state.tuiRef?.requestRender?.();
+  }, WORKING_TICK_MS);
+}
+
+export function workingSpinnerFrame(
+  state: PluginState,
+  theme?: { fg?: (color: string, text: string) => string } | null,
+): string {
+  const frame = WORKING_BOUNCE_FRAMES[state.workingSpinnerIndex % WORKING_BOUNCE_FRAMES.length]
+    ?? "●" + "∙".repeat(WORKING_BOUNCE_LEN - 1);
+  const color = thinkingFgColor(state.activeThinkingLevel || "off");
+  try {
+    return theme?.fg?.(color, frame) ?? frame;
+  } catch {
+    return frame;
+  }
 }
 
 /**
@@ -112,6 +191,7 @@ export function createPluginState(): PluginState {
  */
 export function resetPluginState(state: PluginState): void {
   clearTaskCompletionErrorNotificationTimer(state);
+  stopWorkingSpinner(state);
   state.needsFixedEditorReinstall = false;
   state.installRetryAttempts = 0;
   state.currentEditor = null;
@@ -126,6 +206,7 @@ export function resetPluginState(state: PluginState): void {
  */
 export function cleanupPluginState(state: PluginState): void {
   clearTaskCompletionErrorNotificationTimer(state);
+  stopWorkingSpinner(state);
   state.installRetryAttempts = 0;
   state.registeredClaudeCodeCompatProviders = new Set();
   state.registeredCodexCompatProviders = new Set();

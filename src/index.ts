@@ -26,7 +26,7 @@ import {
 } from "./continue-mode.ts";
 import { getTaskCompletionNotificationAnswer, getTaskCompletionNotificationStatus, notifyTaskCompleteCoalesced, shouldNotifyTaskCompletion } from "./notify.ts";
 import { showAgentKitSettingsPanel } from "./settings-panel.ts";
-import { createPluginState, resetPluginState, cleanupPluginState } from "./plugin-state.ts";
+import { createPluginState, resetPluginState, cleanupPluginState, startWorkingSpinner, stopWorkingSpinner } from "./plugin-state.ts";
 import type { PluginState } from "./plugin-state.ts";
 import { notify, activeModel } from "./utils.ts";
 import { updateProviderStatuses } from "./status-updater.ts";
@@ -165,7 +165,15 @@ export default function agentKitPlugin(pi: ExtensionAPI) {
       setupEditorBound(ctx);
     } else if (key === "mouseScroll") {
       reinstallFixedEditorBound(ctx, { force: true });
-    } else if (key === "showExtensionStatus" || key === "editorChrome") {
+    } else if (key === "showExtensionStatus" || key === "editorChrome" || key === "showGitStatus") {
+      if (key === "editorChrome") {
+        try {
+          ctx.ui.setWorkingVisible?.(!value);
+        } catch {
+          // ignore
+        }
+        if (!value) stopWorkingSpinner(state);
+      }
       state.fixedEditorCompositor?.requestRepaint();
       state.tuiRef?.requestRender?.();
     }
@@ -351,6 +359,15 @@ export default function agentKitPlugin(pi: ExtensionAPI) {
 
     if (!ctx.hasUI) return;
 
+    // Move working indicator into editor-chrome bottom-left; hide built-in row.
+    if (config.editorChrome) {
+      try {
+        ctx.ui.setWorkingVisible?.(false);
+      } catch {
+        // older pi without the API
+      }
+    }
+
     installFooterCapture(ctx);
     setupEditorBound(ctx);
     reinstallFixedEditorBound(ctx);
@@ -376,7 +393,25 @@ export default function agentKitPlugin(pi: ExtensionAPI) {
     }
   });
 
+  pi.on("agent_start", async (_event, ctx) => {
+    if (!ctx.hasUI || !config.editorChrome) return;
+    try {
+      ctx.ui.setWorkingVisible?.(false);
+    } catch {
+      // ignore
+    }
+    startWorkingSpinner(state);
+    state.fixedEditorCompositor?.requestRepaint();
+    state.tuiRef?.requestRender?.();
+  });
+
   pi.on("agent_end", async (event, ctx) => {
+    if (state.isWorking) {
+      stopWorkingSpinner(state);
+      state.fixedEditorCompositor?.requestRepaint();
+      state.tuiRef?.requestRender?.();
+    }
+
     const failedAssistant = findLastContinuableAssistantError(event.messages);
     const failureSnapshot = createContinueFailureSnapshot(failedAssistant);
     state.lastContinueFailure = failureSnapshot ?? null;
