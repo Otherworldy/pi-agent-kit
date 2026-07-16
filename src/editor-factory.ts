@@ -26,13 +26,18 @@ export function wrapEditorFactory(
       editor.render = (width: number) => {
         const theme = state.activeCtxRef?.ui?.theme as { fg?: (color: string, text: string) => string } | undefined;
         let workingLabel = "";
-        if (state.isWorking) {
+        const statusText = state.isCompacting
+          ? (state.compactingLabel || "Compacting context... (escape to cancel)")
+          : state.isWorking
+            ? "esc interrupt"
+            : "";
+        if (statusText) {
           const bounce = workingSpinnerFrame(state, theme);
-          let text = "esc interrupt";
+          let text = statusText;
           try {
-            text = theme?.fg?.("muted", "esc interrupt") ?? "esc interrupt";
+            text = theme?.fg?.("muted", statusText) ?? statusText;
           } catch {
-            text = "esc interrupt";
+            text = statusText;
           }
           workingLabel = `${bounce} ${text}`;
         }

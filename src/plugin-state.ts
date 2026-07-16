@@ -45,8 +45,10 @@ export interface PluginState {
   // 任务完成通知状态
   taskCompletionErrorNotificationTimer: ReturnType<typeof setTimeout> | null;
 
-  // 输入区外左下角 working 指示
+  // 输入区外左下角 status 指示（working / compacting）
   isWorking: boolean;
+  isCompacting: boolean;
+  compactingLabel: string | null;
   workingSpinnerIndex: number;
   workingSpinnerTimer: ReturnType<typeof setInterval> | null;
 
@@ -108,19 +110,13 @@ export function createPluginState(): PluginState {
     previousCompatProviderConfigs: new Map(),
     taskCompletionErrorNotificationTimer: null,
     isWorking: false,
+    isCompacting: false,
+    compactingLabel: null,
     workingSpinnerIndex: 0,
     workingSpinnerTimer: null,
     lastContinueFailure: null,
     pendingContinueRequest: null,
   };
-}
-
-export function stopWorkingSpinner(state: PluginState): void {
-  state.isWorking = false;
-  if (state.workingSpinnerTimer) {
-    clearInterval(state.workingSpinnerTimer);
-    state.workingSpinnerTimer = null;
-  }
 }
 
 // Long dual-dot bounce track (● travels L→R→L across dim dots).
@@ -161,15 +157,80 @@ function bounceFrames(length: number): string[] {
 
 const WORKING_BOUNCE_FRAMES = bounceFrames(WORKING_BOUNCE_LEN);
 
-export function startWorkingSpinner(state: PluginState): void {
-  stopWorkingSpinner(state);
-  state.isWorking = true;
+function stopStatusSpinnerTimer(state: PluginState): void {
+  if (state.workingSpinnerTimer) {
+    clearInterval(state.workingSpinnerTimer);
+    state.workingSpinnerTimer = null;
+  }
+}
+
+/** Keep bounce timer alive while working and/or compacting. */
+export function ensureStatusSpinner(state: PluginState): void {
+  if (state.workingSpinnerTimer) return;
   state.workingSpinnerIndex = 0;
   state.workingSpinnerTimer = setInterval(() => {
     state.workingSpinnerIndex = (state.workingSpinnerIndex + 1) % WORKING_BOUNCE_FRAMES.length;
     state.fixedEditorCompositor?.requestRepaint();
     state.tuiRef?.requestRender?.();
   }, WORKING_TICK_MS);
+}
+
+function maybeStopStatusSpinner(state: PluginState): void {
+  if (!state.isWorking && !state.isCompacting) stopStatusSpinnerTimer(state);
+}
+
+export function startWorkingSpinner(state: PluginState): void {
+  state.isWorking = true;
+  ensureStatusSpinner(state);
+}
+
+export function stopWorkingSpinner(state: PluginState): void {
+  state.isWorking = false;
+  maybeStopStatusSpinner(state);
+}
+
+export function setCompactingStatus(state: PluginState, label: string | null): void {
+  if (label) {
+    state.isCompacting = true;
+    state.compactingLabel = label;
+    ensureStatusSpinner(state);
+    return;
+  }
+  state.isCompacting = false;
+  state.compactingLabel = null;
+  maybeStopStatusSpinner(state);
+}
+
+/** Strip ANSI + OSC sequences for plain-text matching. */
+export function stripAnsi(text: string): string {
+  return text
+    .replace(/\][^\u0007]*\u0007/g, "")
+    .replace(/\[[0-9;?]*[ -/]*[@-~]/g, "");
+}
+
+/**
+ * Relocate built-in compaction loader lines out of statusContainer into external chrome.
+ * Returns filtered lines + compacting label (null when not compacting).
+ */
+export function peelCompactingStatusLines(lines: string[]): { filtered: string[]; label: string | null } {
+  const plain = lines.map((line) => stripAnsi(line));
+  const idx = plain.findIndex((line) => /compact(ing)?/i.test(line));
+  if (idx === -1) return { filtered: lines, label: null };
+
+  // Drop spinner glyph when present: "⠋ Compacting context..." (not multi-word prefixes).
+  const raw = plain[idx].trim();
+  const spinnerPrefix = raw.match(/^(\S{1,2})\s+(.+)$/);
+  const label = (spinnerPrefix?.[2] && /compact/i.test(spinnerPrefix[2])
+    ? spinnerPrefix[2]
+    : raw) || "Compacting context...";
+
+  const filtered = lines.filter((_, i) => {
+    const p = plain[i].trim();
+    if (!p) return false; // Loader adds a blank pad line
+    if (/compact(ing)?/i.test(p)) return false;
+    return true;
+  });
+  return { filtered, label };
 }
 
 export function workingSpinnerFrame(
@@ -192,6 +253,7 @@ export function workingSpinnerFrame(
 export function resetPluginState(state: PluginState): void {
   clearTaskCompletionErrorNotificationTimer(state);
   stopWorkingSpinner(state);
+  setCompactingStatus(state, null);
   state.needsFixedEditorReinstall = false;
   state.installRetryAttempts = 0;
   state.currentEditor = null;
@@ -207,6 +269,7 @@ export function resetPluginState(state: PluginState): void {
 export function cleanupPluginState(state: PluginState): void {
   clearTaskCompletionErrorNotificationTimer(state);
   stopWorkingSpinner(state);
+  setCompactingStatus(state, null);
   state.installRetryAttempts = 0;
   state.registeredClaudeCodeCompatProviders = new Set();
   state.registeredCodexCompatProviders = new Set();

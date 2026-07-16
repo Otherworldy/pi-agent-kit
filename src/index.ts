@@ -37,6 +37,7 @@ import {
   writeProviderRequestConfig,
 } from "./provider-registry.ts";
 import { ensureEditorFactoryInstalled } from "./editor-factory.ts";
+import { installUserMessageChrome } from "./user-message.ts";
 import {
   teardownFixedEditorCompositor,
   installFallbackWidgets,
@@ -59,6 +60,13 @@ export default function agentKitPlugin(pi: ExtensionAPI) {
 
   // 插件状态
   const state: PluginState = createPluginState();
+
+  // User message chrome: ▌ + solid bg matching input panel (active while editorChrome on).
+  installUserMessageChrome({
+    getTheme: () => state.activeCtxRef?.ui?.theme as any,
+    getThinkingLevel: () => state.activeThinkingLevel || "off",
+    isEnabled: () => config.editorChrome,
+  });
 
   // 创建绑定到当前状态的函数
   const queueInstallRetryBound = (ctx: any) => queueInstallRetry(ctx, state, reinstallFixedEditorBound);

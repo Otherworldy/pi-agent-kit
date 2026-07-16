@@ -1,5 +1,6 @@
 import type { PluginState } from "./plugin-state.ts";
 import type { AgentKitConfig } from "./config.ts";
+import { peelCompactingStatusLines, setCompactingStatus } from "./plugin-state.ts";
 import { TerminalSplitCompositor, emergencyTerminalModeReset } from "./fixed-editor/terminal-split.ts";
 import { renderFixedEditorCluster } from "./fixed-editor/cluster.ts";
 import { visibleWidth } from "@earendil-works/pi-tui";
@@ -103,9 +104,20 @@ export function installFixedEditorCompositor(
       return bypass;
     },
     renderCluster: (width, terminalRows) => {
-      const statusContainerLines = state.fixedStatusContainer
-        ? compositor.renderHidden(state.fixedStatusContainer, width).filter((line) => visibleWidth(line) > 0)
+      const rawStatusLines = state.fixedStatusContainer
+        ? compositor.renderHidden(state.fixedStatusContainer, width)
         : [];
+
+      // Move compaction loader into editor-chrome external left status (same as working).
+      let statusContainerLines: string[];
+      if (config.editorChrome) {
+        const { filtered, label } = peelCompactingStatusLines(rawStatusLines);
+        setCompactingStatus(state, label);
+        statusContainerLines = filtered.filter((line) => visibleWidth(line) > 0);
+      } else {
+        statusContainerLines = rawStatusLines.filter((line) => visibleWidth(line) > 0);
+      }
+
       const aboveWidgetLines = state.fixedWidgetContainerAbove ? compositor.renderHidden(state.fixedWidgetContainerAbove, width) : [];
       const belowWidgetLines = state.fixedWidgetContainerBelow ? compositor.renderHidden(state.fixedWidgetContainerBelow, width) : [];
 
