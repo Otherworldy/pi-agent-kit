@@ -24,7 +24,7 @@ import {
   filterContinueContext,
   findLastContinuableAssistantError,
 } from "./continue-mode.ts";
-import { getTaskCompletionNotificationAnswer, getTaskCompletionNotificationStatus, notifyTaskCompleteCoalesced, shouldNotifyTaskCompletion } from "./notify.ts";
+import { clearPendingTaskCompletionErrorNotification, getTaskCompletionNotificationAnswer, getTaskCompletionNotificationStatus, notifyTaskCompleteCoalesced, shouldNotifyTaskCompletion } from "./notify.ts";
 import { showAgentKitSettingsPanel } from "./settings-panel.ts";
 import { createPluginState, resetPluginState, cleanupPluginState, startWorkingSpinner, stopWorkingSpinner } from "./plugin-state.ts";
 import type { PluginState } from "./plugin-state.ts";
@@ -402,6 +402,9 @@ export default function agentKitPlugin(pi: ExtensionAPI) {
   });
 
   pi.on("agent_start", async (_event, ctx) => {
+    // Auto-retry (and any new run) means the task is still alive — suppress the prior error toast.
+    clearPendingTaskCompletionErrorNotification(state);
+
     if (!ctx.hasUI || !config.editorChrome) return;
     try {
       ctx.ui.setWorkingVisible?.(false);

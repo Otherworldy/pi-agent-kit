@@ -172,6 +172,25 @@ test("error task completion notifications are coalesced before sending", async (
   }
 });
 
+test("agent restart clears pending error notifications without sending", async () => {
+  const state: TaskCompletionNotificationCoalescingState = { taskCompletionErrorNotificationTimer: null };
+  const sent: Array<{ status: TaskCompletionNotificationStatus; answer?: string }> = [];
+  const send = (status: TaskCompletionNotificationStatus, _channels: NotificationChannelsConfig, answer?: string) => {
+    sent.push({ status, answer });
+  };
+
+  try {
+    notifyTaskCompleteCoalesced(state, "error", disabledNotificationChannels(), "retryable", { errorDelayMs: 20, send });
+    clearPendingTaskCompletionErrorNotification(state);
+
+    assert.equal(state.taskCompletionErrorNotificationTimer, null);
+    await wait(30);
+    assert.deepEqual(sent, []);
+  } finally {
+    clearPendingTaskCompletionErrorNotification(state);
+  }
+});
+
 test("completed and aborted task completion results clear pending error notifications", async () => {
   const state: TaskCompletionNotificationCoalescingState = { taskCompletionErrorNotificationTimer: null };
   const sent: Array<{ status: TaskCompletionNotificationStatus; answer?: string }> = [];
