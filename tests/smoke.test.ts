@@ -605,7 +605,8 @@ test("editor chrome renders model, thinking level, context usage, git status, cw
     assert.ok(joined.includes("my-openai/gpt-5.5"));
     assert.ok(joined.includes("high"));
     assert.ok(joined.includes("Codex"));
-    assert.ok(joined.includes("ctx 42%/200k"));
+    assert.ok(joined.includes("84k/200k"));
+    assert.ok(joined.includes("$0.000"));
     assert.ok(joined.includes(" · "));
     assert.ok(joined.includes("main"));
     assert.match(joined, /clean|Δ/);
@@ -646,6 +647,73 @@ test("editor chrome omits git status outside repositories", () => {
   } finally {
     rmSync(cwd, { recursive: true, force: true });
   }
+});
+
+test("editor chrome context is bottom-right and respects left/right slot order", () => {
+  const theme = { fg: (_kind: string, text: string) => text };
+  const base = {
+    width: 100,
+    enabled: true as const,
+    thinkingLevel: "off",
+    renderBase: (width: number) => ["─".repeat(width), "body".padEnd(width), "─".repeat(width)],
+  };
+  const session = {
+    getEntries: () => [{
+      type: "message",
+      message: { role: "assistant", usage: { cost: { total: 1.234 } } },
+    }],
+  };
+
+  const withCtx = renderEditorChrome({
+    ...base,
+    context: {
+      cwd: process.cwd(),
+      model: { id: "m", contextWindow: 500000 },
+      ui: { theme },
+      getContextUsage: () => ({ tokens: 34000, percent: 8, contextWindow: 500000 }),
+      sessionManager: session,
+    },
+  });
+  const meta = withCtx.find((line) => line.includes("34k/500k"));
+  assert.ok(meta);
+  const plain = (meta ?? "").replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, "").trimEnd();
+  assert.ok(plain.endsWith("34k/500k"));
+  assert.ok(plain.includes("$1.234"));
+  assert.ok(plain.indexOf("$1.234") < plain.indexOf("34k/500k"));
+
+  // custom order: context left, cost right; empty lists hide
+  const reordered = renderEditorChrome({
+    ...base,
+    display: { left: ["context", "model"], right: ["cost"] },
+    context: {
+      cwd: process.cwd(),
+      model: { id: "reorder-model", contextWindow: 500000 },
+      ui: { theme },
+      getContextUsage: () => ({ tokens: 34000, percent: 8, contextWindow: 500000 }),
+      sessionManager: session,
+    },
+  });
+  const reorderedMeta = reordered.find((line) => line.includes("34k/500k"));
+  const reorderedPlain = (reorderedMeta ?? "").replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, "").replace(/^▌\s*/, "").trimEnd();
+  assert.ok(reorderedPlain.startsWith("34k/500k"));
+  assert.ok(reorderedPlain.includes("reorder-model"));
+  assert.ok(reorderedPlain.endsWith("$1.234"));
+
+  const hidden = renderEditorChrome({
+    ...base,
+    display: { left: [], right: [] },
+    context: {
+      cwd: process.cwd(),
+      model: { id: "hidden-model", contextWindow: 500000 },
+      ui: { theme },
+      getContextUsage: () => ({ tokens: 34000, percent: 8, contextWindow: 500000 }),
+      sessionManager: session,
+    },
+  });
+  const joined = hidden.join("\n");
+  assert.equal(joined.includes("hidden-model"), false);
+  assert.equal(joined.includes("34k/500k"), false);
+  assert.equal(joined.includes("$1.234"), false);
 });
 
 test("editor chrome left bar follows borderColor (bash green) over thinking level", () => {

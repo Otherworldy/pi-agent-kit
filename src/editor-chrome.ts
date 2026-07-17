@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
 import type { ThemeColor } from "@earendil-works/pi-coding-agent";
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import type { EditorChromeDisplayConfig, EditorChromeSlot } from "./config.ts";
 
 const GIT_CACHE_MS = 2000;
 const MIN_CHROME_WIDTH = 16;
@@ -24,6 +25,9 @@ export interface EditorChromeContextLike {
   model?: { contextWindow?: number; id?: string; name?: string; provider?: string };
   ui?: { theme?: ThemeLike };
   getContextUsage?: () => { percent?: number | null; contextWindow?: number; tokens?: number | null } | undefined;
+  sessionManager?: {
+    getEntries?: () => Array<{ type?: string; message?: any }>;
+  };
 }
 
 export interface EditorChromeRenderInput {
@@ -34,6 +38,8 @@ export interface EditorChromeRenderInput {
   providerCompatLabel?: string;
   fastLabel?: string;
   showGitStatus?: boolean;
+  /** Meta layout: left/right slot lists (order = display order). */
+  display?: EditorChromeDisplayConfig;
   /** Left-outside working label, e.g. "⠋ working". Empty when idle. */
   workingLabel?: string;
   /** Pi editor border: thinking level, or green in bash (!) mode. */
@@ -247,17 +253,110 @@ function padLine(line: string, width: number): string {
 // Shared light tone for model / ctx / provider-compat meta items.
 const META_LIGHT: ThemeColor = "muted";
 
+const DEFAULT_DISPLAY: EditorChromeDisplayConfig = {
+  left: ["model", "thinking", "providerCompat", "fast"],
+  right: ["cost", "context"],
+};
+
+function resolveDisplay(partial?: EditorChromeDisplayConfig): EditorChromeDisplayConfig {
+  if (!partial) return { left: [...DEFAULT_DISPLAY.left], right: [...DEFAULT_DISPLAY.right] };
+  return {
+    left: Array.isArray(partial.left) ? [...partial.left] : [...DEFAULT_DISPLAY.left],
+    right: Array.isArray(partial.right) ? [...partial.right] : [...DEFAULT_DISPLAY.right],
+  };
+}
+
+/** Match pi footer token formatting. */
+export function formatTokenCount(count: number): string {
+  if (count < 1000) return String(count);
+  if (count < 10000) return `${(count / 1000).toFixed(1)}k`;
+  if (count < 1000000) return `${Math.round(count / 1000)}k`;
+  if (count < 10000000) return `${(count / 1000000).toFixed(1)}M`;
+  return `${Math.round(count / 1000000)}M`;
+}
+
+/** e.g. 34k/500k */
 function formatContextUsage(context: EditorChromeContextLike, theme: ThemeLike | undefined): string {
   try {
     const usage = context.getContextUsage?.();
-    if (!usage || usage.percent === null || usage.percent === undefined) return "";
+    if (!usage) return "";
 
-    const percent = Math.max(0, Math.round(usage.percent));
     const contextWindow = usage.contextWindow ?? context.model?.contextWindow;
-    const suffix = contextWindow ? `/${Math.round(contextWindow / 1000)}k` : "";
-    return fg(theme, META_LIGHT, `ctx ${percent}%${suffix}`);
+    const windowText = contextWindow && contextWindow > 0 ? formatTokenCount(contextWindow) : "?";
+    const tokens = usage.tokens;
+
+    if (tokens === null || tokens === undefined) {
+      return fg(theme, META_LIGHT, `?/${windowText}`);
+    }
+
+    return fg(theme, META_LIGHT, `${formatTokenCount(Math.max(0, tokens))}/${windowText}`);
   } catch {
     return "";
+  }
+}
+
+function formatSessionCost(context: EditorChromeContextLike, theme: ThemeLike | undefined): string {
+  try {
+    const entries = context.sessionManager?.getEntries?.() ?? [];
+    let total = 0;
+    for (const entry of entries) {
+      if (entry.type === "message" && entry.message?.role === "assistant") {
+        const cost = entry.message?.usage?.cost?.total;
+        if (typeof cost === "number" && Number.isFinite(cost)) total += cost;
+      }
+    }
+    return fg(theme, META_LIGHT, `$${total.toFixed(3)}`);
+  } catch {
+    return "";
+  }
+}
+
+function packLeftRight(left: string, right: string, width: number): string {
+  if (!right) return padLine(left, width);
+  if (!left) {
+    const pad = Math.max(0, width - visibleWidth(right));
+    return `${" ".repeat(pad)}${right}`;
+  }
+
+  let leftText = left;
+  if (visibleWidth(leftText) + 1 + visibleWidth(right) > width) {
+    leftText = truncateToWidth(leftText, Math.max(0, width - visibleWidth(right) - 1), "…");
+  }
+  if (!leftText) {
+    const pad = Math.max(0, width - visibleWidth(right));
+    return `${" ".repeat(pad)}${right}`;
+  }
+
+  const gap = Math.max(1, width - visibleWidth(leftText) - visibleWidth(right));
+  return `${leftText}${" ".repeat(gap)}${right}`;
+}
+
+function renderChromeSlot(
+  slot: EditorChromeSlot,
+  context: EditorChromeContextLike,
+  theme: ThemeLike | undefined,
+  thinkingLevel: string,
+  width: number,
+  providerCompatLabel?: string,
+  fastLabel?: string,
+): string {
+  switch (slot) {
+    case "model":
+      return fg(theme, META_LIGHT, compactModelId(modelChromeLabel(context), Math.max(1, width)));
+    case "thinking": {
+      const thinkingText = thinkingLevel || "off";
+      return thinkingText === "off" ? "" : fg(theme, thinkingColor(thinkingText), thinkingText);
+    }
+    case "providerCompat":
+      return providerCompatLabel ? fg(theme, META_LIGHT, providerCompatLabel) : "";
+    case "fast":
+      return fastLabel ? fg(theme, fastLabel.includes("*") ? "warning" : "accent", fastLabel) : "";
+    case "context":
+      return formatContextUsage(context, theme);
+    case "cost":
+      return formatSessionCost(context, theme);
+    default:
+      return "";
   }
 }
 
@@ -265,41 +364,40 @@ function buildMetaLine(
   context: EditorChromeContextLike,
   thinkingLevel: string,
   width: number,
+  display: EditorChromeDisplayConfig,
   providerCompatLabel?: string,
   fastLabel?: string,
 ): string {
   const theme = context.ui?.theme;
   const separator = fg(theme, "dim", " · ");
+  const render = (slot: EditorChromeSlot) => renderChromeSlot(
+    slot,
+    context,
+    theme,
+    thinkingLevel,
+    width,
+    providerCompatLabel,
+    fastLabel,
+  );
 
-  const thinkingText = thinkingLevel || "off";
-  const thinking = thinkingText === "off"
-    ? ""
-    : fg(theme, thinkingColor(thinkingText), thinkingText);
-  // Model / ctx / header-compat share the same light theme color.
-  const providerCompat = providerCompatLabel ? fg(theme, META_LIGHT, providerCompatLabel) : "";
-  const fast = fastLabel ? fg(theme, fastLabel.includes("*") ? "warning" : "accent", fastLabel) : "";
-  const contextUsage = formatContextUsage(context, theme);
+  const leftParts = display.left.map(render).filter(Boolean);
+  const rightParts = display.right.map(render).filter(Boolean);
 
-  const optional = [thinking, providerCompat, fast, contextUsage].filter(Boolean);
-  let extras = [...optional];
-  const modelLabel = modelChromeLabel(context);
-  const pack = (modelText: string, parts: string[]) => [modelText, ...parts].filter(Boolean).join(separator);
+  let left = leftParts.join(separator);
+  let right = rightParts.join(separator);
 
-  let model = fg(theme, META_LIGHT, compactModelId(modelLabel, Math.max(1, width)));
-  let left = pack(model, extras);
-  while (extras.length > 0 && visibleWidth(left) > width) {
-    extras = extras.slice(0, -1);
-    left = pack(model, extras);
+  // Drop trailing left extras first when tight.
+  while (leftParts.length > 1 && visibleWidth(left) + (right ? 1 + visibleWidth(right) : 0) > width) {
+    leftParts.pop();
+    left = leftParts.join(separator);
   }
-  if (visibleWidth(left) > width) {
-    model = fg(theme, META_LIGHT, compactModelId(modelLabel, Math.max(1, width)));
-    left = pack(model, []);
-  }
-  if (visibleWidth(left) > width) {
-    left = truncateToWidth(left, width, "…");
+  // Then drop leading right extras (keep later right slots like context).
+  while (rightParts.length > 1 && visibleWidth(left) + 1 + visibleWidth(right) > width) {
+    rightParts.shift();
+    right = rightParts.join(separator);
   }
 
-  return padLine(left, width);
+  return packLeftRight(left, right, width);
 }
 
 /** Status row outside the input panel: working (left) · git (right). */
@@ -358,10 +456,12 @@ export function renderEditorChrome(input: EditorChromeRenderInput): string[] {
   const topPad = Array.from({ length: BODY_TOP_PADDING }, () => paint(""));
   const metaGap = Array.from({ length: BODY_META_GAP }, () => paint(""));
   const bottomPad = Array.from({ length: PANEL_BOTTOM_PADDING }, () => paint(""));
+  const display = resolveDisplay(input.display);
   const meta = buildMetaLine(
     input.context,
     thinkingLevel,
     contentWidth,
+    display,
     input.providerCompatLabel,
     input.fastLabel,
   );

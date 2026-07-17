@@ -45,6 +45,30 @@ export interface ProviderCompatSwitchConfig {
   codexHeaders: Record<string, string>;
 }
 
+/** Meta-line field ids. Place each in chrome.left / chrome.right to show (order = display order). */
+export type EditorChromeSlot =
+  | "model"
+  | "thinking"
+  | "providerCompat"
+  | "fast"
+  | "context"
+  | "cost";
+
+export const EDITOR_CHROME_SLOTS: readonly EditorChromeSlot[] = [
+  "model",
+  "thinking",
+  "providerCompat",
+  "fast",
+  "context",
+  "cost",
+] as const;
+
+/** left/right slot lists control side + order; omit a slot to hide it. */
+export interface EditorChromeDisplayConfig {
+  left: EditorChromeSlot[];
+  right: EditorChromeSlot[];
+}
+
 export interface AgentKitConfig {
   fixedEditor: boolean;
   mouseScroll: boolean;
@@ -53,6 +77,8 @@ export interface AgentKitConfig {
   taskCompletionNotification: boolean;
   notificationChannels: NotificationChannelsConfig;
   editorChrome: boolean;
+  /** Meta-line layout: which fields on left/right and in what order. */
+  chrome: EditorChromeDisplayConfig;
   fast: FastModeConfig;
   providerCompat: ProviderCompatSwitchConfig;
   claudeCodeCompat: ProviderCompatConfig;
@@ -71,7 +97,8 @@ export type AgentKitBooleanSettingKey =
   | "providerCompat"
   | "fast.enabled";
 
-export type AgentKitConfigUpdates = Partial<Omit<AgentKitConfig, "fast" | "notificationChannels" | "providerCompat" | "claudeCodeCompat" | "codexCompat">> & {
+export type AgentKitConfigUpdates = Partial<Omit<AgentKitConfig, "chrome" | "fast" | "notificationChannels" | "providerCompat" | "claudeCodeCompat" | "codexCompat">> & {
+  chrome?: Partial<EditorChromeDisplayConfig>;
   fast?: Partial<FastModeConfig>;
   notificationChannels?: {
     windowsToast?: Partial<WindowsToastNotificationChannelConfig>;
@@ -136,6 +163,10 @@ const DEFAULT_CONFIG: AgentKitConfig = {
     },
   },
   editorChrome: true,
+  chrome: {
+    left: ["model", "thinking", "providerCompat", "fast"],
+    right: ["cost", "context"],
+  },
   fast: {
     enabled: false,
     persistState: true,
@@ -183,13 +214,39 @@ function mergeSettings(base: Record<string, unknown>, override: Record<string, u
   return merged;
 }
 
-function getSettingsPath(): string {
+function getPiAgentDir(): string {
+  const configured = process.env.PI_CODING_AGENT_DIR;
+  if (configured && configured.trim()) {
+    if (configured === "~") return join(homedir(), ".pi", "agent");
+    if (configured.startsWith("~/") || configured.startsWith("~\\")) {
+      return join(homedir(), configured.slice(2));
+    }
+    return configured;
+  }
   const homeDir = process.env.HOME || process.env.USERPROFILE || homedir();
-  return join(homeDir, ".pi", "agent", "settings.json");
+  return join(homeDir, ".pi", "agent");
+}
+
+function getSettingsPath(): string {
+  return join(getPiAgentDir(), "settings.json");
 }
 
 function getProjectSettingsPath(cwd: string): string {
   return join(cwd, ".pi", "settings.json");
+}
+
+/** Canonical extension config; also accepts legacy typo dir `pi-agent-ket`. */
+export function getExtensionConfigPath(): string {
+  const extensionsDir = join(getPiAgentDir(), "extensions");
+  const kit = join(extensionsDir, "pi-agent-kit", "config.json");
+  const ket = join(extensionsDir, "pi-agent-ket", "config.json");
+  if (existsSync(kit)) return kit;
+  if (existsSync(ket)) return ket;
+  return kit;
+}
+
+function readExtensionConfig(): Record<string, unknown> {
+  return readSettingsFile(getExtensionConfigPath());
 }
 
 function readSettingsFile(settingsPath: string): Record<string, unknown> {
@@ -226,7 +283,27 @@ function readWritableSettingsFile(settingsPath: string): Record<string, unknown>
 }
 
 export function readSettings(cwd: string = process.cwd()): Record<string, unknown> {
-  return mergeSettings(readSettingsFile(getSettingsPath()), readSettingsFile(getProjectSettingsPath(cwd)));
+  // Extension config.json is flat (no agentKit wrapper). settings.json nests under agentKit.
+  // Merge order (later wins): global settings → extension config → project settings.
+  // Extension sits above global so ~/.pi/agent/extensions/pi-agent-kit/config.json is authoritative;
+  // project .pi/settings.json can still override per-repo.
+  const extension = readExtensionConfig();
+  const globalSettings = readSettingsFile(getSettingsPath());
+  const projectSettings = readSettingsFile(getProjectSettingsPath(cwd));
+  const settings = mergeSettings(globalSettings, projectSettings);
+
+  const globalAgentKit = isRecord(globalSettings[AGENT_KIT_SETTINGS_KEY])
+    ? globalSettings[AGENT_KIT_SETTINGS_KEY] as Record<string, unknown>
+    : {};
+  const projectAgentKit = isRecord(projectSettings[AGENT_KIT_SETTINGS_KEY])
+    ? projectSettings[AGENT_KIT_SETTINGS_KEY] as Record<string, unknown>
+    : {};
+  const agentKit = mergeSettings(mergeSettings(globalAgentKit, extension), projectAgentKit);
+
+  return {
+    ...settings,
+    [AGENT_KIT_SETTINGS_KEY]: agentKit,
+  };
 }
 
 function boolFromObject(value: unknown, key: string): boolean | undefined {
@@ -306,6 +383,43 @@ function parseFastConfig(agentKit: unknown): FastModeConfig {
     persistState: boolFromObject(fast, "persistState") ?? DEFAULT_CONFIG.fast.persistState,
     serviceTier: stringFromObject(fast, "serviceTier", DEFAULT_CONFIG.fast.serviceTier),
     supportedModels: stringArrayFromObject(fast, "supportedModels", DEFAULT_CONFIG.fast.supportedModels),
+  };
+}
+
+const CHROME_SLOT_SET = new Set<string>(EDITOR_CHROME_SLOTS);
+
+function parseChromeSlots(value: unknown, fallback: readonly EditorChromeSlot[]): EditorChromeSlot[] {
+  if (!Array.isArray(value)) return [...fallback];
+  const slots: EditorChromeSlot[] = [];
+  for (const item of value) {
+    if (typeof item === "string" && CHROME_SLOT_SET.has(item)) {
+      slots.push(item as EditorChromeSlot);
+    }
+  }
+  return slots;
+}
+
+function parseChromeDisplayConfig(agentKit: unknown): EditorChromeDisplayConfig {
+  const chrome = isRecord(agentKit) && isRecord(agentKit.chrome) ? agentKit.chrome : undefined;
+  const d = DEFAULT_CONFIG.chrome;
+  if (!chrome) return { left: [...d.left], right: [...d.right] };
+
+  // Preferred: { left: [...], right: [...] }
+  if (Array.isArray(chrome.left) || Array.isArray(chrome.right)) {
+    return {
+      left: parseChromeSlots(chrome.left, d.left),
+      right: parseChromeSlots(chrome.right, d.right),
+    };
+  }
+
+  // Legacy boolean map: filter default sides by false flags.
+  const keep = (slot: EditorChromeSlot) => {
+    if (!Object.prototype.hasOwnProperty.call(chrome, slot)) return true;
+    return chrome[slot] !== false;
+  };
+  return {
+    left: d.left.filter(keep),
+    right: d.right.filter(keep),
   };
 }
 
@@ -416,6 +530,7 @@ export function parseAgentKitConfig(settings: Record<string, unknown>): AgentKit
     notificationChannels: parseNotificationChannelsConfig(agentKit),
     editorChrome: boolFromObject(agentKit, "editorChrome")
       ?? DEFAULT_CONFIG.editorChrome,
+    chrome: parseChromeDisplayConfig(agentKit),
     fast: parseFastConfig(agentKit),
     providerCompat,
     claudeCodeCompat: parseProviderCompatConfig(
@@ -444,6 +559,25 @@ export function writeAgentKitSetting(
   cwd: string,
   updates: AgentKitConfigUpdates,
 ): boolean {
+  const extensionPath = getExtensionConfigPath();
+  const extensionExists = existsSync(extensionPath);
+
+  // Prefer dedicated extension config when present (or default kit path once created).
+  // Fall back to project/global settings.json for tests / legacy installs without extension dir.
+  if (extensionExists || !hasAgentKitSettings(readSettingsFile(getProjectSettingsPath(cwd)))) {
+    const existing = readWritableSettingsFile(extensionPath);
+    if (existing === null) return false;
+    const next = nextAgentKitSetting(existing, updates);
+    try {
+      mkdirSync(dirname(extensionPath), { recursive: true });
+      writeFileSync(extensionPath, JSON.stringify(next, null, 2) + "\n");
+      return true;
+    } catch (error) {
+      console.debug(`[pi-agent-kit] Failed to persist setting to ${extensionPath}:`, error);
+      return false;
+    }
+  }
+
   const globalSettingsPath = getSettingsPath();
   const projectSettingsPath = getProjectSettingsPath(cwd);
   const globalSettings = readWritableSettingsFile(globalSettingsPath);

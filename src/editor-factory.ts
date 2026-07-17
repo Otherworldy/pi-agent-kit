@@ -49,6 +49,7 @@ export function wrapEditorFactory(
           providerCompatLabel: getProviderCompatChromeLabel(state.activeCtxRef, state.currentModelRef, config),
           fastLabel: getFastChromeLabel(state.activeCtxRef, state.currentModelRef, state.fastDesired, config.fast.supportedModels),
           showGitStatus: config.showGitStatus,
+          display: config.chrome,
           workingLabel,
           borderColor: editor.borderColor,
           renderBase: originalRender,
