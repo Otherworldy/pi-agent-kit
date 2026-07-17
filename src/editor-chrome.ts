@@ -36,6 +36,7 @@ export interface EditorChromeRenderInput {
   showGitStatus?: boolean;
   /** Left-outside working label, e.g. "⠋ working". Empty when idle. */
   workingLabel?: string;
+  /** Pi editor border: thinking level, or green in bash (!) mode. */
   borderColor?: (text: string) => string;
   renderBase: (width: number) => string[];
 }
@@ -329,8 +330,12 @@ function paintPanelLine(
   thinkingLevel: string,
   content: string,
   contentWidth: number,
+  borderColor?: (text: string) => string,
 ): string {
-  const bar = fg(theme, thinkingColor(thinkingLevel || "off"), LEFT_BAR);
+  // borderColor = thinking rail, or green when Pi is in bash (!) mode.
+  const bar = borderColor
+    ? borderColor(LEFT_BAR)
+    : fg(theme, thinkingColor(thinkingLevel || "off"), LEFT_BAR);
   const pad = " ".repeat(PAD_X);
   // ▌ | pad | content | pad — equal inset under solid panel bg; no ─ borders
   return withPanelBg(theme, bar + pad + padLine(content, contentWidth) + pad);
@@ -349,7 +354,7 @@ export function renderEditorChrome(input: EditorChromeRenderInput): string[] {
 
   const theme = input.context.ui?.theme;
   const thinkingLevel = input.thinkingLevel || "off";
-  const paint = (content: string) => paintPanelLine(theme, thinkingLevel, content, contentWidth);
+  const paint = (content: string) => paintPanelLine(theme, thinkingLevel, content, contentWidth, input.borderColor);
   const topPad = Array.from({ length: BODY_TOP_PADDING }, () => paint(""));
   const metaGap = Array.from({ length: BODY_META_GAP }, () => paint(""));
   const bottomPad = Array.from({ length: PANEL_BOTTOM_PADDING }, () => paint(""));

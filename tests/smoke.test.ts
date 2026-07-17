@@ -648,6 +648,48 @@ test("editor chrome omits git status outside repositories", () => {
   }
 });
 
+test("editor chrome left bar follows borderColor (bash green) over thinking level", () => {
+  const lines = renderEditorChrome({
+    width: 80,
+    enabled: true,
+    context: {
+      cwd: process.cwd(),
+      model: { id: "model" },
+      ui: {
+        theme: {
+          fg: (kind: string, text: string) => (kind === "thinkingHigh" ? `[TH]${text}` : text),
+        },
+      },
+    },
+    thinkingLevel: "high",
+    borderColor: (text) => `[BASH]${text}`,
+    renderBase: (width) => ["─".repeat(width), "!ls".padEnd(width), "─".repeat(width)],
+  });
+
+  assert.ok(lines.some((line) => line.includes("[BASH]▌")));
+  assert.equal(lines.some((line) => line.includes("[TH]▌")), false);
+});
+
+test("editor chrome left bar falls back to thinking color without borderColor", () => {
+  const lines = renderEditorChrome({
+    width: 80,
+    enabled: true,
+    context: {
+      cwd: process.cwd(),
+      model: { id: "model" },
+      ui: {
+        theme: {
+          fg: (kind: string, text: string) => (kind === "thinkingHigh" ? `[TH]${text}` : text),
+        },
+      },
+    },
+    thinkingLevel: "high",
+    renderBase: (width) => ["─".repeat(width), "hello".padEnd(width), "─".repeat(width)],
+  });
+
+  assert.ok(lines.some((line) => line.includes("[TH]▌")));
+});
+
 test("editor chrome keeps autocomplete popup rows below the custom border", async () => {
   await withTempSettings(async ({ cwd }) => {
     const baseEditorFactory = () => ({
