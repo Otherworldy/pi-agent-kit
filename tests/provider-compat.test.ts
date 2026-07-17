@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import type { CodexCompatConfig, ProviderCompatConfig } from "../src/config.ts";
+import { buildCodexUserAgent, type CodexCompatConfig, type ProviderCompatConfig } from "../src/config.ts";
 import {
   getClaudeCodeCompatProviderNames,
   getCodexCompatHeaders,
@@ -142,6 +142,31 @@ test("Claude Code compat returns undefined when nothing changes or model is unsu
   }), undefined);
 });
 
+test("Codex User-Agent matches official get_codex_user_agent shape", () => {
+  assert.equal(
+    buildCodexUserAgent({
+      originator: "codex_cli_rs",
+      version: "0.144.5",
+      platform: "linux",
+      arch: "x64",
+      osVersion: "6.8.0",
+      terminal: "tmux",
+    }),
+    "codex_cli_rs/0.144.5 (Linux 6.8.0; x86_64) tmux",
+  );
+  assert.equal(
+    buildCodexUserAgent({
+      originator: "codex_cli_rs",
+      version: "0.144.5",
+      platform: "darwin",
+      arch: "arm64",
+      osVersion: "14.5.0",
+      terminal: "iTerm.app/3.5.0",
+    }),
+    "codex_cli_rs/0.144.5 (Mac OS 14.5.0; arm64) iTerm.app/3.5.0",
+  );
+});
+
 test("Codex compat builds Codex CLI-like headers with real session metadata", () => {
   const headers = getCodexCompatHeaders(codexConfig, "session-id", { provider: "my-codex", id: "gpt-5.5" });
 
@@ -150,6 +175,15 @@ test("Codex compat builds Codex CLI-like headers with real session metadata", ()
   assert.equal(headers["OpenAI-Beta"], "responses=experimental");
   assert.equal(headers["X-Codex-Beta-Features"], "remote_compaction_v2");
   assert.equal(headers.Session_id, "session-id");
+  assert.equal(headers["session-id"], "session-id");
+  assert.equal(headers["Session-Id"], "session-id");
+  assert.equal(headers.Thread_id, "session-id");
+  assert.equal(headers["thread-id"], "session-id");
+  assert.equal(headers["Thread-Id"], "session-id");
+  assert.equal(headers["X-Client-Request-Id"], "session-id");
+  assert.equal(headers["x-client-request-id"], "session-id");
+  assert.equal(headers["X-Codex-Window-Id"], "session-id:0");
+  assert.equal(headers["x-codex-window-id"], "session-id:0");
 
   const metadata = JSON.parse(headers["X-Codex-Turn-Metadata"]);
   assert.equal(metadata.session_id, "session-id");
@@ -159,6 +193,22 @@ test("Codex compat builds Codex CLI-like headers with real session metadata", ()
   assert.equal(metadata.model, "gpt-5.5");
   assert.equal(typeof metadata.turn_id, "string");
   assert.equal(typeof metadata.turn_started_at_unix_ms, "number");
+});
+
+test("Codex compat omits empty beta features header", () => {
+  const headers = getCodexCompatHeaders({
+    ...codexConfig,
+    headers: {
+      Originator: "codex_cli_rs",
+      "User-Agent": "codex_cli_rs/test",
+      "OpenAI-Beta": "responses=experimental",
+      "X-Codex-Beta-Features": "",
+      "X-Codex-Turn-Metadata": "",
+    },
+  }, "session-id");
+
+  assert.equal(headers["X-Codex-Beta-Features"], undefined);
+  assert.ok(headers["X-Codex-Turn-Metadata"]);
 });
 
 test("Codex compat patches OpenAI Responses payloads without mutating originals", () => {

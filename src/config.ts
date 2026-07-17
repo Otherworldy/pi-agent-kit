@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { homedir } from "node:os";
+import { homedir, release } from "node:os";
 
 export interface FastModeConfig {
   enabled: boolean;
@@ -136,9 +136,33 @@ export const DEFAULT_CLAUDE_CODE_COMPAT_HEADERS = {
 
 export const DEFAULT_CLAUDE_CODE_SYSTEM_TEXT = "You are Claude Code, Anthropic's official CLI for Claude.";
 
+/** Matches openai/codex `get_codex_user_agent`: `{originator}/{version} ({os_type} {os_version}; {arch}) {terminal}`. */
+export function buildCodexUserAgent(options?: {
+  originator?: string;
+  version?: string;
+  platform?: NodeJS.Platform | string;
+  arch?: string;
+  osVersion?: string;
+  terminal?: string;
+}): string {
+  const originator = options?.originator || process.env.PI_CODEX_COMPAT_ORIGINATOR || "codex_cli_rs";
+  const version = options?.version || process.env.PI_CODEX_COMPAT_VERSION || "0.144.5";
+  const platform = options?.platform || process.platform;
+  const osType = platform === "darwin" ? "Mac OS" : platform === "win32" ? "Windows" : platform === "linux" ? "Linux" : String(platform);
+  const osVersion = options?.osVersion || process.env.PI_CODEX_COMPAT_OS_VERSION || release();
+  const archRaw = options?.arch || process.arch;
+  const arch = archRaw === "x64" ? "x86_64" : archRaw === "ia32" ? "x86" : archRaw;
+  const program = process.env.TERM_PROGRAM?.trim();
+  const programVersion = process.env.TERM_PROGRAM_VERSION?.trim();
+  const terminal = options?.terminal
+    || process.env.PI_CODEX_COMPAT_TERMINAL
+    || (program ? (programVersion ? `${program}/${programVersion}` : program) : process.env.TERM?.trim() || "unknown");
+  return `${originator}/${version} (${osType} ${osVersion}; ${arch}) ${terminal}`;
+}
+
 export const DEFAULT_CODEX_COMPAT_HEADERS = {
   Originator: process.env.PI_CODEX_COMPAT_ORIGINATOR || "codex_cli_rs",
-  "User-Agent": process.env.PI_CODEX_COMPAT_USER_AGENT || `codex_cli_rs/${process.env.PI_CODEX_COMPAT_VERSION || "0.132.0"} (${process.platform}; ${process.arch}) node`,
+  "User-Agent": process.env.PI_CODEX_COMPAT_USER_AGENT || buildCodexUserAgent(),
   "OpenAI-Beta": "responses=experimental",
   "X-Codex-Beta-Features": process.env.PI_CODEX_COMPAT_BETA_FEATURES || "",
   "X-Codex-Turn-Metadata": "",

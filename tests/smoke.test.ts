@@ -876,6 +876,11 @@ test("provider compat switch auto-registers Codex headers and patches responses 
     assert.equal(providerConfig.headers["OpenAI-Beta"], "responses=experimental");
     assert.equal(providerConfig.headers["X-Codex-Beta-Features"], "remote_compaction_v2");
     assert.equal(providerConfig.headers.Session_id, "test-session-id");
+    assert.equal(providerConfig.headers["session-id"], "test-session-id");
+    assert.equal(providerConfig.headers.Thread_id, "test-session-id");
+    assert.equal(providerConfig.headers["thread-id"], "test-session-id");
+    assert.equal(providerConfig.headers["X-Client-Request-Id"], "test-session-id");
+    assert.equal(providerConfig.headers["X-Codex-Window-Id"], "test-session-id:0");
     const sessionMetadata = readTurnMetadata();
     assert.equal(sessionMetadata.session_id, "test-session-id");
     assert.equal(sessionMetadata.thread_id, "test-session-id");

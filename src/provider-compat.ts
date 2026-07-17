@@ -234,20 +234,57 @@ function getCodexPromptCacheKey(
   return (typeof existing === "string" ? existing.trim() : "") || sessionId;
 }
 
+function hasHeader(headers: Record<string, string>, ...names: string[]): boolean {
+  return names.some((name) => {
+    const value = headers[name];
+    return typeof value === "string" && value.trim().length > 0;
+  });
+}
+
+function setHeaderAliases(headers: Record<string, string>, value: string, ...names: string[]): void {
+  for (const name of names) headers[name] = value;
+}
+
+/**
+ * Build Codex CLI request headers the way openai/codex does:
+ * - default client: originator + User-Agent
+ * - responses session: session-id, thread-id, x-client-request-id
+ * - compatibility: x-codex-window-id, x-codex-turn-metadata, x-codex-beta-features
+ * Also keeps Session_id / Thread_id aliases for older new-api pass_headers templates.
+ */
 function withCodexHeaders(
   headers: Record<string, string>,
   sessionId: string,
   model: ProviderCompatModelLike | null | undefined,
 ): Record<string, string> {
   const nextHeaders = { ...headers };
-  if (!nextHeaders.Session_id) nextHeaders.Session_id = sessionId;
-  if (!nextHeaders["X-Codex-Turn-Metadata"]) {
+  const windowId = `${sessionId}:0`;
+
+  if (!hasHeader(nextHeaders, "session-id", "Session-Id", "Session_id")) {
+    setHeaderAliases(nextHeaders, sessionId, "session-id", "Session-Id", "Session_id");
+  }
+  if (!hasHeader(nextHeaders, "thread-id", "Thread-Id", "Thread_id")) {
+    setHeaderAliases(nextHeaders, sessionId, "thread-id", "Thread-Id", "Thread_id");
+  }
+  if (!hasHeader(nextHeaders, "x-client-request-id", "X-Client-Request-Id")) {
+    setHeaderAliases(nextHeaders, sessionId, "x-client-request-id", "X-Client-Request-Id");
+  }
+  if (!hasHeader(nextHeaders, "x-codex-window-id", "X-Codex-Window-Id")) {
+    setHeaderAliases(nextHeaders, windowId, "x-codex-window-id", "X-Codex-Window-Id");
+  }
+
+  // Official client only sends beta features when non-empty.
+  if (!nextHeaders["X-Codex-Beta-Features"]?.trim()) {
+    delete nextHeaders["X-Codex-Beta-Features"];
+  }
+
+  if (!hasHeader(nextHeaders, "X-Codex-Turn-Metadata", "x-codex-turn-metadata")) {
     const metadata: Record<string, unknown> = {
       session_id: sessionId,
       thread_id: sessionId,
       turn_id: randomUUID(),
       request_kind: "turn",
-      window_id: `${sessionId}:0`,
+      window_id: windowId,
       sandbox: "none",
       turn_started_at_unix_ms: Date.now(),
     };
