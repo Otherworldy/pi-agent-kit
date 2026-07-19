@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { initTheme } from "@earendil-works/pi-coding-agent";
 import { clearEditorChromeGitCache, renderEditorChrome } from "../src/editor-chrome.ts";
 import agentKitPlugin from "../src/index.ts";
+import { buildClaudeMetadataUserId } from "../src/provider-compat.ts";
 
 // 增加EventEmitter监听器限制，避免测试中的警告
 process.setMaxListeners(20);
@@ -664,6 +665,36 @@ test("editor chrome context is bottom-right and respects left/right slot order",
     }],
   };
 
+  // parent + subagent toolResult child cost
+  const withSubagent = renderEditorChrome({
+    ...base,
+    context: {
+      cwd: process.cwd(),
+      model: { id: "m", contextWindow: 500000 },
+      ui: { theme },
+      getContextUsage: () => ({ tokens: 34000, percent: 8, contextWindow: 500000 }),
+      sessionManager: {
+        getEntries: () => [
+          { type: "message", message: { role: "assistant", usage: { cost: { total: 1.0 } } } },
+          {
+            type: "message",
+            message: {
+              role: "toolResult",
+              toolName: "subagent",
+              details: {
+                mode: "single",
+                results: [{ agent: "worker", usage: { cost: 0.5 } }],
+                totalChildUsage: { cost: 0.5 },
+              },
+            },
+          },
+        ],
+      },
+    },
+  });
+  const subMeta = withSubagent.find((line) => line.includes("$1.500"));
+  assert.ok(subMeta, "chrome cost should include subagent child usage");
+
   const withCtx = renderEditorChrome({
     ...base,
     context: {
@@ -843,6 +874,7 @@ test("provider compat switch auto-registers Claude Code headers and patches Clau
     assert.equal(providerConfig.headers["X-App"], "cli");
     assert.equal(providerConfig.headers["Anthropic-Version"], "2023-06-01");
     assert.equal(providerConfig.headers["Anthropic-Beta"], "claude-code-20250219,interleaved-thinking-2025-05-14");
+    assert.equal(providerConfig.headers["X-Claude-Code-Session-Id"], "test-session-id");
     assert.equal(harness.statuses.get("agent-kit-claude-code"), "CC compat");
     assert.deepEqual(await harness.emit("before_provider_request", {
       payload: {
@@ -855,6 +887,7 @@ test("provider compat switch auto-registers Claude Code headers and patches Clau
         { role: "system", content: "You are Claude Code, Anthropic's official CLI for Claude." },
         { role: "user", content: "hi" },
       ],
+      metadata: { user_id: buildClaudeMetadataUserId("test-session-id") },
     });
   });
 });
@@ -898,19 +931,22 @@ test("provider compat switch auto-registers Codex headers and patches responses 
     assert.notEqual(secondTurnMetadata.turn_id, firstTurnMetadata.turn_id);
     assert.equal(secondTurnMetadata.model, "gpt-5.5");
 
-    assert.deepEqual(await harness.emit("before_provider_request", {
+    const patched = await harness.emit("before_provider_request", {
       payload: {
         model: "gpt-5.5",
         input: [{ role: "user", content: "hi" }],
         client_metadata: { "x-codex-installation-id": "real-installation-id" },
       },
-    }), {
-      model: "gpt-5.5",
-      input: [{ role: "user", content: "hi" }],
-      client_metadata: { "x-codex-installation-id": "real-installation-id" },
-      prompt_cache_key: "test-session-id",
-      store: false,
-      instructions: "",
-    });
+    }) as Record<string, unknown>;
+    assert.equal(patched.model, "gpt-5.5");
+    assert.equal(patched.prompt_cache_key, "test-session-id");
+    assert.equal(patched.store, false);
+    assert.equal(patched.instructions, "");
+    const cm = patched.client_metadata as Record<string, string>;
+    assert.equal(cm["x-codex-installation-id"], "real-installation-id");
+    assert.equal(cm.session_id, "test-session-id");
+    assert.equal(cm.thread_id, "test-session-id");
+    assert.equal(cm["x-codex-window-id"], "test-session-id:0");
+    assert.equal(typeof cm.turn_id, "string");
   });
 });

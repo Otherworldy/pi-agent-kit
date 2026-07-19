@@ -336,6 +336,7 @@ export default function agentKitPlugin(pi: ExtensionAPI) {
     const claudeCodePayload = patchClaudeCodeCompatPayload(fastPayload ?? event.payload, {
       config: config.claudeCodeCompat,
       model: state.currentModelRef,
+      sessionId: ctx.sessionManager.getSessionId(),
     });
 
     const codexPayload = patchCodexCompatPayload(claudeCodePayload ?? fastPayload ?? event.payload, {

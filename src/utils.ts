@@ -75,14 +75,37 @@ export function hasVisibleOverlay(tui: any): boolean {
   return Array.isArray(overlayStack) && overlayStack.some((entry) => entry && entry.hidden !== true);
 }
 
+function isWsl(env: NodeJS.ProcessEnv = process.env): boolean {
+  return Boolean(env.WSL_DISTRO_NAME || env.WSL_INTEROP || env.WSLENV);
+}
+
+/** Host terminals (Netcatty) need OSC 52; WSL is not SSH-remote so pi may skip it. */
+function emitOsc52Clipboard(text: string): boolean {
+  const encoded = Buffer.from(text).toString("base64");
+  if (encoded.length > 100_000) return false;
+  process.stdout.write(`\x1b]52;c;${encoded}\x07`);
+  return true;
+}
+
 /**
  * 复制文本到剪贴板
  */
 export function copyTextToClipboard(ctx: any, text: string): void {
-  void copyToClipboard(text).then(
-    () => notify(ctx, "Copied selection", "info"),
-    (error) => notify(ctx, `Copy failed: ${error instanceof Error ? error.message : String(error)}`, "warning"),
-  );
+  void (async () => {
+    let ok = false;
+    try {
+      await copyToClipboard(text);
+      ok = true;
+    } catch {
+      // fall through — host path may still work via OSC 52
+    }
+    // WSL + Netcatty: xclip/wl-copy fill the Linux clipboard only; toast would lie.
+    if (isWsl()) {
+      ok = emitOsc52Clipboard(text) || ok;
+    }
+    if (ok) notify(ctx, "Copied selection", "info");
+    else notify(ctx, "Copy failed", "warning");
+  })();
 }
 
 /**

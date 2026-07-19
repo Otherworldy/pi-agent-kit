@@ -1,7 +1,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { AgentKitConfig } from "./config.ts";
 import type { ProviderRequestConfig } from "./plugin-state.ts";
-import { getClaudeCodeCompatProviderNames, getCodexCompatHeaders, getCodexCompatProviderNames } from "./provider-compat.ts";
+import { getClaudeCodeCompatHeaders, getClaudeCodeCompatProviderNames, getCodexCompatHeaders, getCodexCompatProviderNames } from "./provider-compat.ts";
 import { notify, activeModel } from "./utils.ts";
 
 /**
@@ -89,7 +89,7 @@ export function registerProviderCompatProviders(
       ...previousConfig,
       headers: {
         ...previousConfig?.headers,
-        ...(claudeProviders.has(provider) ? config.claudeCodeCompat.headers : {}),
+        ...(claudeProviders.has(provider) ? getClaudeCodeCompatHeaders(config.claudeCodeCompat, sessionId) : {}),
         ...(codexProviders.has(provider) ? getCodexCompatHeaders(config.codexCompat, sessionId, model) : {}),
       },
     });

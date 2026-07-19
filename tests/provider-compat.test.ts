@@ -1,8 +1,17 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { buildCodexUserAgent, type CodexCompatConfig, type ProviderCompatConfig } from "../src/config.ts";
 import {
+  buildClaudeCodeUserAgent,
+  buildCodexUserAgent,
+  stainlessArch,
+  stainlessOs,
+  type CodexCompatConfig,
+  type ProviderCompatConfig,
+} from "../src/config.ts";
+import {
+  buildClaudeMetadataUserId,
+  getClaudeCodeCompatHeaders,
   getClaudeCodeCompatProviderNames,
   getCodexCompatHeaders,
   getCodexCompatProviderNames,
@@ -20,6 +29,7 @@ const claudeConfig: ProviderCompatConfig = {
   headers: { "User-Agent": "claude-cli/test", "X-App": "cli" },
   systemIdentity: true,
   systemText: "You are Claude Code, Anthropic's official CLI for Claude.",
+  metadataUserId: "",
 };
 
 const codexConfig: CodexCompatConfig = {
@@ -35,6 +45,7 @@ const codexConfig: CodexCompatConfig = {
   },
   systemIdentity: false,
   systemText: "You are Codex CLI, OpenAI's official coding agent.",
+  metadataUserId: "",
   store: false,
 };
 
@@ -71,16 +82,56 @@ test("provider compat registers only the active provider for the detected family
   assert.deepEqual(getCodexCompatProviderNames(codexConfig, { provider: "my-claude", id: "claude-sonnet" }), []);
 });
 
+test("Claude Code User-Agent matches official getUserAgent shape", () => {
+  assert.equal(
+    buildClaudeCodeUserAgent({ version: "2.1.212", userType: "external", entrypoint: "cli" }),
+    "claude-cli/2.1.212 (external, cli)",
+  );
+  assert.equal(
+    buildClaudeCodeUserAgent({
+      version: "2.1.212",
+      userType: "external",
+      entrypoint: "cli",
+      agentSdkVersion: "0.1.0",
+      clientApp: "my-app/1.0",
+    }),
+    "claude-cli/2.1.212 (external, cli, agent-sdk/0.1.0, client-app/my-app/1.0)",
+  );
+  assert.equal(stainlessOs("darwin"), "MacOS");
+  assert.equal(stainlessOs("linux"), "Linux");
+  assert.equal(stainlessOs("win32"), "Windows");
+  assert.equal(stainlessArch("x64"), "x64");
+  assert.equal(stainlessArch("arm64"), "arm64");
+});
+
+test("Claude Code compat builds session header from real session id", () => {
+  const headers = getClaudeCodeCompatHeaders(claudeConfig, "session-abc");
+  assert.equal(headers["User-Agent"], "claude-cli/test");
+  assert.equal(headers["X-App"], "cli");
+  assert.equal(headers["X-Claude-Code-Session-Id"], "session-abc");
+  assert.equal(headers["x-claude-code-session-id"], "session-abc");
+});
+
+test("Claude Code metadata.user_id uses sub2api-compatible JSON format", () => {
+  const auto = JSON.parse(buildClaudeMetadataUserId("sess-1"));
+  assert.equal(auto.device_id.length, 64);
+  assert.equal(auto.account_uuid, "");
+  assert.equal(auto.session_id, "sess-1");
+  assert.equal(buildClaudeMetadataUserId("sess-1", "custom-id"), "custom-id");
+});
+
 test("Claude Code compat patches native Anthropic payloads without mutating originals", () => {
   const payload = {
     model: "claude-sonnet",
     messages: [{ role: "user", content: "hi" }],
     system: [{ type: "text", text: "Base prompt" }],
   };
+  const expectedUserId = buildClaudeMetadataUserId("sess-1");
 
   const patched = patchClaudeCodeCompatPayload(payload, {
     config: claudeConfig,
     model: { provider: "my-claude", id: "claude-sonnet" },
+    sessionId: "sess-1",
   });
 
   assert.deepEqual(payload, {
@@ -95,22 +146,26 @@ test("Claude Code compat patches native Anthropic payloads without mutating orig
       { type: "text", text: "You are Claude Code, Anthropic's official CLI for Claude." },
       { type: "text", text: "Base prompt" },
     ],
+    metadata: { user_id: expectedUserId },
   });
 });
 
 test("Claude Code compat patches OpenAI chat and responses payload shapes", () => {
+  const expectedUserId = buildClaudeMetadataUserId("sess-1");
   assert.deepEqual(patchClaudeCodeCompatPayload({
     model: "claude-sonnet",
     messages: [{ role: "user", content: "hi" }],
   }, {
     config: claudeConfig,
     model: { provider: "my-claude", id: "claude-sonnet" },
+    sessionId: "sess-1",
   }), {
     model: "claude-sonnet",
     messages: [
       { role: "system", content: "You are Claude Code, Anthropic's official CLI for Claude." },
       { role: "user", content: "hi" },
     ],
+    metadata: { user_id: expectedUserId },
   });
 
   assert.deepEqual(patchClaudeCodeCompatPayload({
@@ -119,12 +174,14 @@ test("Claude Code compat patches OpenAI chat and responses payload shapes", () =
   }, {
     config: claudeConfig,
     model: { provider: "my-claude", id: "claude-sonnet" },
+    sessionId: "sess-1",
   }), {
     model: "claude-sonnet",
     input: [
       { role: "system", content: "You are Claude Code, Anthropic's official CLI for Claude." },
       { role: "user", content: "hi" },
     ],
+    metadata: { user_id: expectedUserId },
   });
 });
 
@@ -132,13 +189,17 @@ test("Claude Code compat returns undefined when nothing changes or model is unsu
   assert.equal(patchClaudeCodeCompatPayload({ model: "gpt-5.5" }, {
     config: claudeConfig,
     model: { provider: "my-codex", id: "gpt-5.5", api: "openai-responses" },
+    sessionId: "sess-1",
   }), undefined);
 
+  const userId = buildClaudeMetadataUserId("sess-1");
   assert.equal(patchClaudeCodeCompatPayload({
     system: [{ type: "text", text: "You are Claude Code, Anthropic's official CLI for Claude." }],
+    metadata: { user_id: userId },
   }, {
     config: claudeConfig,
     model: { provider: "my-claude", id: "claude-sonnet" },
+    sessionId: "sess-1",
   }), undefined);
 });
 
@@ -186,6 +247,8 @@ test("Codex compat builds Codex CLI-like headers with real session metadata", ()
   assert.equal(headers["x-codex-window-id"], "session-id:0");
 
   const metadata = JSON.parse(headers["X-Codex-Turn-Metadata"]);
+  assert.equal(typeof metadata.installation_id, "string");
+  assert.ok(metadata.installation_id.length > 0);
   assert.equal(metadata.session_id, "session-id");
   assert.equal(metadata.thread_id, "session-id");
   assert.equal(metadata.window_id, "session-id:0");
@@ -222,25 +285,27 @@ test("Codex compat patches OpenAI Responses payloads without mutating originals"
     config: codexConfig,
     model: { provider: "my-codex", id: "gpt-5.5", api: "openai-codex-responses" },
     sessionId: "session-id",
-  });
+  }) as Record<string, unknown>;
 
   assert.deepEqual(payload, {
     model: "gpt-5.5",
     input: [{ role: "user", content: "hi" }],
     max_output_tokens: 1024,
   });
-  assert.deepEqual(patched, {
-    model: "gpt-5.5",
-    input: [{ role: "user", content: "hi" }],
-    max_output_tokens: 1024,
-    prompt_cache_key: "session-id",
-    store: false,
-    instructions: "",
-  });
+  assert.equal(patched.model, "gpt-5.5");
+  assert.equal(patched.prompt_cache_key, "session-id");
+  assert.equal(patched.store, false);
+  assert.equal(patched.instructions, "");
+  const cm = patched.client_metadata as Record<string, string>;
+  assert.ok(cm["x-codex-installation-id"]?.length);
+  assert.equal(cm.session_id, "session-id");
+  assert.equal(cm.thread_id, "session-id");
+  assert.equal(cm["x-codex-window-id"], "session-id:0");
+  assert.equal(typeof cm.turn_id, "string");
 });
 
 test("Codex compat preserves upstream cache and installation IDs", () => {
-  assert.deepEqual(patchCodexCompatPayload({
+  const patched = patchCodexCompatPayload({
     model: "gpt-5.5",
     input: [{ role: "user", content: "hi" }],
     prompt_cache_key: "upstream-cache-key",
@@ -249,18 +314,16 @@ test("Codex compat preserves upstream cache and installation IDs", () => {
     config: codexConfig,
     model: { provider: "my-codex", id: "gpt-5.5", api: "openai-responses" },
     sessionId: "session-id",
-  }), {
-    model: "gpt-5.5",
-    input: [{ role: "user", content: "hi" }],
-    prompt_cache_key: "upstream-cache-key",
-    client_metadata: { "x-codex-installation-id": "upstream-installation-id" },
-    store: false,
-    instructions: "",
-  });
+  }) as Record<string, unknown>;
+
+  assert.equal(patched.prompt_cache_key, "upstream-cache-key");
+  const cm = patched.client_metadata as Record<string, string>;
+  assert.equal(cm["x-codex-installation-id"], "upstream-installation-id");
+  assert.equal(cm.session_id, "session-id");
 });
 
 test("Codex compat can prepend optional instructions and skips non-responses payloads", () => {
-  assert.deepEqual(patchCodexCompatPayload({
+  const patched = patchCodexCompatPayload({
     model: "gpt-5.5",
     instructions: "Base instructions",
     input: [{ role: "user", content: "hi" }],
@@ -268,13 +331,15 @@ test("Codex compat can prepend optional instructions and skips non-responses pay
     config: { ...codexConfig, systemIdentity: true },
     model: { provider: "my-codex", id: "gpt-5.5", api: "openai-responses" },
     sessionId: "session-id",
-  }), {
-    model: "gpt-5.5",
-    instructions: "You are Codex CLI, OpenAI's official coding agent.\nBase instructions",
-    input: [{ role: "user", content: "hi" }],
-    prompt_cache_key: "session-id",
-    store: false,
-  });
+  }) as Record<string, unknown>;
+
+  assert.equal(
+    patched.instructions,
+    "You are Codex CLI, OpenAI's official coding agent.\nBase instructions",
+  );
+  assert.equal(patched.prompt_cache_key, "session-id");
+  assert.equal(patched.store, false);
+  assert.ok((patched.client_metadata as Record<string, string>)["x-codex-installation-id"]);
 
   assert.equal(patchCodexCompatPayload({
     model: "gpt-5.5",

@@ -198,25 +198,99 @@ function withOpenAIMessagesSystemIdentity(
   };
 }
 
+/** Simulated device_id (64-hex) for Claude Code metadata.user_id JSON format. */
+const DEFAULT_CLAUDE_DEVICE_ID = "b7e2f1a94c0d8e5f6a1b2c3d4e5f60718293a4b5c6d7e8f90123456789abcdef";
+
+/** Build metadata.user_id accepted by sub2api ParseMetadataUserID (JSON format for modern CLI). */
+export function buildClaudeMetadataUserId(sessionId: string, override = ""): string {
+  const trimmed = override.trim();
+  if (trimmed) return trimmed;
+  const deviceId = process.env.PI_CLAUDE_CODE_COMPAT_DEVICE_ID || DEFAULT_CLAUDE_DEVICE_ID;
+  return JSON.stringify({
+    device_id: deviceId,
+    account_uuid: "",
+    session_id: sessionId || randomUUID(),
+  });
+}
+
+function withMetadataUserId(
+  payload: Record<string, unknown>,
+  metadataUserId: string,
+): Record<string, unknown> | undefined {
+  if (!metadataUserId) return undefined;
+  const metadata = isRecord(payload.metadata) ? payload.metadata : {};
+  if (metadata.user_id === metadataUserId) return undefined;
+  return {
+    ...payload,
+    metadata: {
+      ...metadata,
+      user_id: metadataUserId,
+    },
+  };
+}
+
 export function patchClaudeCodeCompatPayload(
   payload: unknown,
   options: {
     config: ProviderCompatConfig;
     model: ProviderCompatModelLike | null | undefined;
+    sessionId?: string;
   },
 ): unknown | undefined {
   const { config, model } = options;
   if (!supportsClaudeCodeCompat(model, config) || !isRecord(payload)) return undefined;
-  if (!config.systemIdentity) return undefined;
 
-  const systemText = config.systemText.trim();
-  if (!systemText) return undefined;
+  let nextPayload: Record<string, unknown> = payload;
+  let changed = false;
 
-  return model?.api === "anthropic-messages" || hasOwn(payload, "system")
-    ? withNativeAnthropicSystemIdentity(payload, systemText)
-    : hasOwn(payload, "messages")
-      ? withOpenAIMessagesSystemIdentity(payload, "messages", systemText)
-      : withOpenAIMessagesSystemIdentity(payload, "input", systemText);
+  const metadataUserId = buildClaudeMetadataUserId(
+    options.sessionId || "",
+    config.metadataUserId,
+  );
+  const withMetadata = withMetadataUserId(nextPayload, metadataUserId);
+  if (withMetadata) {
+    nextPayload = withMetadata;
+    changed = true;
+  }
+
+  if (config.systemIdentity) {
+    const systemText = config.systemText.trim();
+    if (systemText) {
+      const withSystem = model?.api === "anthropic-messages" || hasOwn(nextPayload, "system")
+        ? withNativeAnthropicSystemIdentity(nextPayload, systemText)
+        : hasOwn(nextPayload, "messages")
+          ? withOpenAIMessagesSystemIdentity(nextPayload, "messages", systemText)
+          : withOpenAIMessagesSystemIdentity(nextPayload, "input", systemText);
+      if (withSystem) {
+        nextPayload = withSystem;
+        changed = true;
+      }
+    }
+  }
+
+  return changed ? nextPayload : undefined;
+}
+
+/**
+ * Build Claude Code CLI request headers the way client.ts + Anthropic SDK do.
+ * Fills `X-Claude-Code-Session-Id` from Pi's session when not overridden.
+ */
+function withClaudeCodeHeaders(
+  headers: Record<string, string>,
+  sessionId: string,
+): Record<string, string> {
+  const nextHeaders = { ...headers };
+  if (!hasHeader(nextHeaders, "X-Claude-Code-Session-Id", "x-claude-code-session-id")) {
+    setHeaderAliases(nextHeaders, sessionId, "X-Claude-Code-Session-Id", "x-claude-code-session-id");
+  }
+  return nextHeaders;
+}
+
+export function getClaudeCodeCompatHeaders(
+  config: ProviderCompatConfig,
+  sessionId: string,
+): Record<string, string> {
+  return withClaudeCodeHeaders(config.headers, sessionId);
 }
 
 function isOpenAIResponsesPayload(payload: Record<string, unknown>, model: ProviderCompatModelLike | null | undefined): boolean {
@@ -280,6 +354,7 @@ function withCodexHeaders(
 
   if (!hasHeader(nextHeaders, "X-Codex-Turn-Metadata", "x-codex-turn-metadata")) {
     const metadata: Record<string, unknown> = {
+      installation_id: getCodexInstallationId(),
       session_id: sessionId,
       thread_id: sessionId,
       turn_id: randomUUID(),
@@ -319,6 +394,42 @@ function withCodexInstructions(
   return undefined;
 }
 
+/** Simulated installation id for body client_metadata (gateway gate). */
+const DEFAULT_CODEX_INSTALLATION_ID = "95b11878-7eed-49b6-b70f-064be99a0603";
+
+function getCodexInstallationId(): string {
+  return process.env.PI_CODEX_COMPAT_INSTALLATION_ID?.trim() || DEFAULT_CODEX_INSTALLATION_ID;
+}
+
+/**
+ * Official Codex sends client_metadata on ResponsesAPI bodies.
+ * Some gateways only require non-empty x-codex-installation-id.
+ */
+function withCodexClientMetadata(
+  payload: Record<string, unknown>,
+  sessionId: string,
+): Record<string, unknown> | undefined {
+  const existing = isRecord(payload.client_metadata) ? payload.client_metadata : {};
+  const next: Record<string, unknown> = { ...existing };
+  let changed = !isRecord(payload.client_metadata);
+  const windowId = `${sessionId}:0`;
+
+  const setIfEmpty = (key: string, value: string) => {
+    const current = next[key];
+    if (typeof current === "string" && current.trim()) return;
+    next[key] = value;
+    changed = true;
+  };
+
+  setIfEmpty("x-codex-installation-id", getCodexInstallationId());
+  setIfEmpty("session_id", sessionId);
+  setIfEmpty("thread_id", sessionId);
+  setIfEmpty("x-codex-window-id", windowId);
+  setIfEmpty("turn_id", randomUUID());
+
+  return changed ? { ...payload, client_metadata: next } : undefined;
+}
+
 function withCodexPayloadDefaults(
   payload: Record<string, unknown>,
   config: CodexCompatConfig,
@@ -341,6 +452,12 @@ function withCodexPayloadDefaults(
 
   if (!hasOwn(nextPayload, "instructions")) {
     nextPayload = { ...nextPayload, instructions: "" };
+    changed = true;
+  }
+
+  const withMetadata = withCodexClientMetadata(nextPayload, sessionId);
+  if (withMetadata) {
+    nextPayload = withMetadata;
     changed = true;
   }
 

@@ -26,7 +26,7 @@ export interface EditorChromeContextLike {
   ui?: { theme?: ThemeLike };
   getContextUsage?: () => { percent?: number | null; contextWindow?: number; tokens?: number | null } | undefined;
   sessionManager?: {
-    getEntries?: () => Array<{ type?: string; message?: any }>;
+    getEntries?: () => Array<{ type?: string; customType?: string; details?: any; message?: any }>;
   };
 }
 
@@ -295,6 +295,39 @@ function formatContextUsage(context: EditorChromeContextLike, theme: ThemeLike |
   }
 }
 
+/** Subagent costs live in toolResult / slash custom_message details, not assistant usage. */
+function subagentDetailsFromEntry(entry: {
+  type?: string;
+  customType?: string;
+  details?: any;
+  message?: any;
+}): { results?: Array<{ usage?: { cost?: number } }>; totalChildUsage?: { cost?: number }; totalCost?: { costUsd?: number } } | undefined {
+  if (entry.type === "custom_message" && entry.customType === "subagent-slash-result") {
+    const details = entry.details?.result?.details;
+    return details && Array.isArray(details.results) ? details : undefined;
+  }
+  if (entry.type === "message" && entry.message?.role === "toolResult" && entry.message?.toolName === "subagent") {
+    const details = entry.message.details;
+    return details && Array.isArray(details.results) ? details : undefined;
+  }
+  return undefined;
+}
+
+function subagentChildCost(details: NonNullable<ReturnType<typeof subagentDetailsFromEntry>>): number {
+  if (typeof details.totalCost?.costUsd === "number" && Number.isFinite(details.totalCost.costUsd)) {
+    return details.totalCost.costUsd;
+  }
+  if (typeof details.totalChildUsage?.cost === "number" && Number.isFinite(details.totalChildUsage.cost)) {
+    return details.totalChildUsage.cost;
+  }
+  let sum = 0;
+  for (const result of details.results ?? []) {
+    const cost = result?.usage?.cost;
+    if (typeof cost === "number" && Number.isFinite(cost)) sum += cost;
+  }
+  return sum;
+}
+
 function formatSessionCost(context: EditorChromeContextLike, theme: ThemeLike | undefined): string {
   try {
     const entries = context.sessionManager?.getEntries?.() ?? [];
@@ -304,6 +337,8 @@ function formatSessionCost(context: EditorChromeContextLike, theme: ThemeLike | 
         const cost = entry.message?.usage?.cost?.total;
         if (typeof cost === "number" && Number.isFinite(cost)) total += cost;
       }
+      const details = subagentDetailsFromEntry(entry);
+      if (details) total += subagentChildCost(details);
     }
     return fg(theme, META_LIGHT, `$${total.toFixed(3)}`);
   } catch {

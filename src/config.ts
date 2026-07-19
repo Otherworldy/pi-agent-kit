@@ -16,6 +16,8 @@ export interface ProviderCompatConfig {
   headers: Record<string, string>;
   systemIdentity: boolean;
   systemText: string;
+  /** Full `metadata.user_id` override. Empty = auto JSON for Claude Code gateways. */
+  metadataUserId: string;
 }
 
 export interface CodexCompatConfig extends ProviderCompatConfig {
@@ -118,21 +120,82 @@ export const DEFAULT_FAST_SUPPORTED_MODELS = [
   "openai-codex/gpt-5.5",
 ] as const;
 
-export const DEFAULT_CLAUDE_CODE_COMPAT_HEADERS = {
-  "User-Agent": "claude-cli/2.1.75 (external, cli)",
-  "X-App": "cli",
-  "X-Stainless-Arch": process.env.PI_CLAUDE_CODE_COMPAT_ARCH || process.arch,
-  "X-Stainless-Lang": "js",
-  "X-Stainless-Os": process.env.PI_CLAUDE_CODE_COMPAT_OS || process.platform,
-  "X-Stainless-Package-Version": process.env.PI_CLAUDE_CODE_COMPAT_VERSION || "2.1.75",
-  "X-Stainless-Retry-Count": "0",
-  "X-Stainless-Runtime": "node",
-  "X-Stainless-Runtime-Version": process.env.PI_CLAUDE_CODE_COMPAT_RUNTIME_VERSION || process.versions.node,
-  "X-Stainless-Timeout": "600",
-  "Anthropic-Version": "2023-06-01",
-  "Anthropic-Dangerous-Direct-Browser-Access": "true",
-  "Anthropic-Beta": "claude-code-20250219,interleaved-thinking-2025-05-14",
-} as const;
+/** Matches Claude Code CLI `getUserAgent`: `claude-cli/${VERSION} (${USER_TYPE}, ${ENTRYPOINT}...)`. */
+export function buildClaudeCodeUserAgent(options?: {
+  version?: string;
+  userType?: string;
+  entrypoint?: string;
+  agentSdkVersion?: string;
+  clientApp?: string;
+}): string {
+  const version = options?.version || process.env.PI_CLAUDE_CODE_COMPAT_VERSION || "2.1.212";
+  const userType = options?.userType || process.env.PI_CLAUDE_CODE_COMPAT_USER_TYPE || "external";
+  const entrypoint = options?.entrypoint || process.env.PI_CLAUDE_CODE_COMPAT_ENTRYPOINT || "cli";
+  const agentSdk = options?.agentSdkVersion || process.env.CLAUDE_AGENT_SDK_VERSION;
+  const clientApp = options?.clientApp || process.env.CLAUDE_AGENT_SDK_CLIENT_APP;
+  const extras = [
+    agentSdk ? `agent-sdk/${agentSdk}` : "",
+    clientApp ? `client-app/${clientApp}` : "",
+  ].filter(Boolean);
+  const suffix = extras.length > 0 ? `, ${extras.join(", ")}` : "";
+  return `claude-cli/${version} (${userType}, ${entrypoint}${suffix})`;
+}
+
+/** Matches Anthropic TS SDK `normalizePlatform`. */
+export function stainlessOs(platform: string = process.platform): string {
+  const p = platform.toLowerCase();
+  if (p.includes("ios")) return "iOS";
+  if (p === "android") return "Android";
+  if (p === "darwin") return "MacOS";
+  if (p === "win32") return "Windows";
+  if (p === "freebsd") return "FreeBSD";
+  if (p === "openbsd") return "OpenBSD";
+  if (p === "linux") return "Linux";
+  return p ? `Other:${p}` : "Unknown";
+}
+
+/** Matches Anthropic TS SDK `normalizeArch`. */
+export function stainlessArch(arch: string = process.arch): string {
+  if (arch === "x32") return "x32";
+  if (arch === "x86_64" || arch === "x64") return "x64";
+  if (arch === "arm") return "arm";
+  if (arch === "aarch64" || arch === "arm64") return "arm64";
+  return arch ? `other:${arch}` : "unknown";
+}
+
+/**
+ * Default headers Claude Code CLI puts on Anthropic requests:
+ * - client.ts: x-app, User-Agent, X-Claude-Code-Session-Id (+ optional remote/client-app)
+ * - Anthropic SDK: X-Stainless-*, anthropic-version, anthropic-dangerous-direct-browser-access
+ * - betas body → Anthropic-Beta header (baseline agentic set)
+ */
+export function buildClaudeCodeDefaultHeaders(): Record<string, string> {
+  const cliVersion = process.env.PI_CLAUDE_CODE_COMPAT_VERSION || "2.1.212";
+  const sdkVersion = process.env.PI_CLAUDE_CODE_COMPAT_SDK_VERSION || "0.52.0";
+  const timeoutMs = Number(process.env.API_TIMEOUT_MS || process.env.PI_CLAUDE_CODE_COMPAT_TIMEOUT_MS || 600_000);
+  const timeoutSec = Number.isFinite(timeoutMs) && timeoutMs > 0 ? String(Math.trunc(timeoutMs / 1000)) : "600";
+  const beta = process.env.PI_CLAUDE_CODE_COMPAT_BETA
+    || process.env.ANTHROPIC_BETAS
+    || "claude-code-20250219,interleaved-thinking-2025-05-14";
+
+  return {
+    "User-Agent": process.env.PI_CLAUDE_CODE_COMPAT_USER_AGENT || buildClaudeCodeUserAgent({ version: cliVersion }),
+    "X-App": "cli",
+    "X-Stainless-Arch": process.env.PI_CLAUDE_CODE_COMPAT_ARCH || stainlessArch(),
+    "X-Stainless-Lang": "js",
+    "X-Stainless-Os": process.env.PI_CLAUDE_CODE_COMPAT_OS || stainlessOs(),
+    "X-Stainless-Package-Version": process.env.PI_CLAUDE_CODE_COMPAT_PACKAGE_VERSION || sdkVersion,
+    "X-Stainless-Retry-Count": "0",
+    "X-Stainless-Runtime": "node",
+    "X-Stainless-Runtime-Version": process.env.PI_CLAUDE_CODE_COMPAT_RUNTIME_VERSION || process.version,
+    "X-Stainless-Timeout": process.env.PI_CLAUDE_CODE_COMPAT_TIMEOUT || timeoutSec,
+    "Anthropic-Version": "2023-06-01",
+    "Anthropic-Dangerous-Direct-Browser-Access": "true",
+    "Anthropic-Beta": beta,
+  };
+}
+
+export const DEFAULT_CLAUDE_CODE_COMPAT_HEADERS = buildClaudeCodeDefaultHeaders();
 
 export const DEFAULT_CLAUDE_CODE_SYSTEM_TEXT = "You are Claude Code, Anthropic's official CLI for Claude.";
 
@@ -209,6 +272,7 @@ const DEFAULT_CONFIG: AgentKitConfig = {
     headers: { ...DEFAULT_CLAUDE_CODE_COMPAT_HEADERS },
     systemIdentity: true,
     systemText: DEFAULT_CLAUDE_CODE_SYSTEM_TEXT,
+    metadataUserId: "",
   },
   codexCompat: {
     enabled: false,
@@ -217,6 +281,7 @@ const DEFAULT_CONFIG: AgentKitConfig = {
     headers: { ...DEFAULT_CODEX_COMPAT_HEADERS },
     systemIdentity: false,
     systemText: DEFAULT_CODEX_SYSTEM_TEXT,
+    metadataUserId: "",
     store: false,
   },
 };
@@ -508,6 +573,7 @@ function parseProviderCompatConfig(
     headers: stringRecordFromObject(rawConfig, "headers", headers),
     systemIdentity: boolFromObject(rawConfig, "systemIdentity") ?? defaults.systemIdentity,
     systemText: stringFromObject(rawConfig, "systemText", defaults.systemText),
+    metadataUserId: stringFromObject(rawConfig, "metadataUserId", defaults.metadataUserId),
   };
 }
 
