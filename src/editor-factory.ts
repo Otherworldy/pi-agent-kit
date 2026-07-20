@@ -1,7 +1,7 @@
 import { CustomEditor } from "@earendil-works/pi-coding-agent";
 import type { PluginState, EditorFactory, AgentKitEditorFactory } from "./plugin-state.ts";
 import type { AgentKitConfig } from "./config.ts";
-import { AGENT_KIT_EDITOR_FACTORY, workingSpinnerFrame } from "./plugin-state.ts";
+import { AGENT_KIT_EDITOR_FACTORY, formatWorkingElapsedMs, getWorkingElapsedMs, workingSpinnerFrame } from "./plugin-state.ts";
 import { renderEditorChrome } from "./editor-chrome.ts";
 import { getFastChromeLabel, getProviderCompatChromeLabel } from "./status-updater.ts";
 import { findContainerWithChild } from "./utils.ts";
@@ -48,6 +48,7 @@ export function wrapEditorFactory(
           thinkingLevel: state.activeThinkingLevel,
           providerCompatLabel: getProviderCompatChromeLabel(state.activeCtxRef, state.currentModelRef, config),
           fastLabel: getFastChromeLabel(state.activeCtxRef, state.currentModelRef, state.fastDesired, config.fast.supportedModels),
+          workingElapsedLabel: formatWorkingElapsedMs(getWorkingElapsedMs(state)),
           showGitStatus: config.showGitStatus,
           display: config.chrome,
           workingLabel,

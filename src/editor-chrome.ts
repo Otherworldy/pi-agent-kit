@@ -37,6 +37,8 @@ export interface EditorChromeRenderInput {
   thinkingLevel: string;
   providerCompatLabel?: string;
   fastLabel?: string;
+  /** Last/live working elapsed text for the `timer` chrome slot, e.g. `12s`. */
+  workingElapsedLabel?: string;
   showGitStatus?: boolean;
   /** Meta layout: left/right slot lists (order = display order). */
   display?: EditorChromeDisplayConfig;
@@ -254,7 +256,7 @@ function padLine(line: string, width: number): string {
 const META_LIGHT: ThemeColor = "muted";
 
 const DEFAULT_DISPLAY: EditorChromeDisplayConfig = {
-  left: ["model", "thinking", "providerCompat", "fast"],
+  left: ["model", "thinking", "timer", "providerCompat", "fast"],
   right: ["cost", "context"],
 };
 
@@ -374,6 +376,7 @@ function renderChromeSlot(
   width: number,
   providerCompatLabel?: string,
   fastLabel?: string,
+  workingElapsedLabel?: string,
 ): string {
   switch (slot) {
     case "model":
@@ -382,6 +385,8 @@ function renderChromeSlot(
       const thinkingText = thinkingLevel || "off";
       return thinkingText === "off" ? "" : fg(theme, thinkingColor(thinkingText), thinkingText);
     }
+    case "timer":
+      return workingElapsedLabel ? fg(theme, META_LIGHT, workingElapsedLabel) : "";
     case "providerCompat":
       return providerCompatLabel ? fg(theme, META_LIGHT, providerCompatLabel) : "";
     case "fast":
@@ -402,6 +407,7 @@ function buildMetaLine(
   display: EditorChromeDisplayConfig,
   providerCompatLabel?: string,
   fastLabel?: string,
+  workingElapsedLabel?: string,
 ): string {
   const theme = context.ui?.theme;
   const separator = fg(theme, "dim", " · ");
@@ -413,6 +419,7 @@ function buildMetaLine(
     width,
     providerCompatLabel,
     fastLabel,
+    workingElapsedLabel,
   );
 
   const leftParts = display.left.map(render).filter(Boolean);
@@ -499,6 +506,7 @@ export function renderEditorChrome(input: EditorChromeRenderInput): string[] {
     display,
     input.providerCompatLabel,
     input.fastLabel,
+    input.workingElapsedLabel,
   );
   const externalStatus = buildExternalStatusLine(input.context, width, {
     showGitStatus: input.showGitStatus,

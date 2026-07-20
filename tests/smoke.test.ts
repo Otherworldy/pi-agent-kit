@@ -8,6 +8,13 @@ import { initTheme } from "@earendil-works/pi-coding-agent";
 import { clearEditorChromeGitCache, renderEditorChrome } from "../src/editor-chrome.ts";
 import agentKitPlugin from "../src/index.ts";
 import { buildClaudeMetadataUserId } from "../src/provider-compat.ts";
+import {
+  createPluginState,
+  formatWorkingElapsedMs,
+  getWorkingElapsedMs,
+  startWorkingSpinner,
+  stopWorkingSpinner,
+} from "../src/plugin-state.ts";
 
 // 增加EventEmitter监听器限制，避免测试中的警告
 process.setMaxListeners(20);
@@ -949,4 +956,57 @@ test("provider compat switch auto-registers Codex headers and patches responses 
     assert.equal(cm["x-codex-window-id"], "test-session-id:0");
     assert.equal(typeof cm.turn_id, "string");
   });
+});
+
+test("working elapsed formats seconds, freezes on stop, stays visible", () => {
+  assert.equal(formatWorkingElapsedMs(0), "0s");
+  assert.equal(formatWorkingElapsedMs(12_400), "12s");
+  assert.equal(formatWorkingElapsedMs(65_000), "1m 05s");
+
+  const state = createPluginState();
+  assert.equal(getWorkingElapsedMs(state), 0);
+  startWorkingSpinner(state);
+  assert.ok(getWorkingElapsedMs(state) >= 0);
+  state.workingStartedAt = Date.now() - 12_400;
+  stopWorkingSpinner(state);
+  assert.equal(state.workingStartedAt, null);
+  assert.ok(state.lastWorkingElapsedMs >= 12_400 && state.lastWorkingElapsedMs < 12_500);
+  assert.equal(getWorkingElapsedMs(state), state.lastWorkingElapsedMs);
+  if (state.workingSpinnerTimer) {
+    clearInterval(state.workingSpinnerTimer);
+    state.workingSpinnerTimer = null;
+  }
+});
+
+test("editor chrome timer slot can be placed, reordered, or hidden", () => {
+  const theme = { fg: (_kind: string, text: string) => text };
+  const base = {
+    width: 100,
+    enabled: true as const,
+    thinkingLevel: "off",
+    workingElapsedLabel: "12s",
+    renderBase: (width: number) => ["─".repeat(width), "body".padEnd(width), "─".repeat(width)],
+    context: {
+      cwd: process.cwd(),
+      model: { id: "m" },
+      ui: { theme },
+    },
+  };
+
+  const withTimer = renderEditorChrome({
+    ...base,
+    display: { left: ["timer", "model"], right: [] },
+  });
+  const withPlain = (withTimer.find((line) => line.includes("12s")) ?? "")
+    .replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, "")
+    .replace(/^▌\s*/, "")
+    .trimEnd();
+  assert.ok(withPlain.startsWith("12s"));
+  assert.ok(withPlain.includes("m"));
+
+  const hidden = renderEditorChrome({
+    ...base,
+    display: { left: ["model"], right: [] },
+  });
+  assert.equal(hidden.some((line) => line.includes("12s")), false);
 });

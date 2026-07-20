@@ -51,6 +51,7 @@ export interface ProviderCompatSwitchConfig {
 export type EditorChromeSlot =
   | "model"
   | "thinking"
+  | "timer"
   | "providerCompat"
   | "fast"
   | "context"
@@ -59,6 +60,7 @@ export type EditorChromeSlot =
 export const EDITOR_CHROME_SLOTS: readonly EditorChromeSlot[] = [
   "model",
   "thinking",
+  "timer",
   "providerCompat",
   "fast",
   "context",
@@ -251,7 +253,7 @@ const DEFAULT_CONFIG: AgentKitConfig = {
   },
   editorChrome: true,
   chrome: {
-    left: ["model", "thinking", "providerCompat", "fast"],
+    left: ["model", "thinking", "timer", "providerCompat", "fast"],
     right: ["cost", "context"],
   },
   fast: {

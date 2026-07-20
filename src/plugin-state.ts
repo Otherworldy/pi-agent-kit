@@ -47,6 +47,10 @@ export interface PluginState {
 
   // 输入区外左下角 status 指示（working / compacting）
   isWorking: boolean;
+  /** agent_start 时刻；仅 working 期间推进，idle 为 null */
+  workingStartedAt: number | null;
+  /** 上一次 working 冻结时长；idle 时持续展示 */
+  lastWorkingElapsedMs: number;
   isCompacting: boolean;
   compactingLabel: string | null;
   workingSpinnerIndex: number;
@@ -110,6 +114,8 @@ export function createPluginState(): PluginState {
     previousCompatProviderConfigs: new Map(),
     taskCompletionErrorNotificationTimer: null,
     isWorking: false,
+    workingStartedAt: null,
+    lastWorkingElapsedMs: 0,
     isCompacting: false,
     compactingLabel: null,
     workingSpinnerIndex: 0,
@@ -181,12 +187,32 @@ function maybeStopStatusSpinner(state: PluginState): void {
 
 export function startWorkingSpinner(state: PluginState): void {
   state.isWorking = true;
+  state.workingStartedAt = Date.now();
   ensureStatusSpinner(state);
 }
 
 export function stopWorkingSpinner(state: PluginState): void {
+  if (state.workingStartedAt != null) {
+    state.lastWorkingElapsedMs = Math.max(0, Date.now() - state.workingStartedAt);
+    state.workingStartedAt = null;
+  }
   state.isWorking = false;
   maybeStopStatusSpinner(state);
+}
+
+/** Live while working, else last frozen working duration. */
+export function getWorkingElapsedMs(state: PluginState, now = Date.now()): number {
+  if (state.workingStartedAt != null) return Math.max(0, now - state.workingStartedAt);
+  return state.lastWorkingElapsedMs;
+}
+
+/** Whole seconds: `12s` / `1m 05s`. */
+export function formatWorkingElapsedMs(ms: number): string {
+  const sec = Math.max(0, Math.floor(ms / 1000));
+  if (sec < 60) return `${sec}s`;
+  const m = Math.floor(sec / 60);
+  const s = sec % 60;
+  return `${m}m ${String(s).padStart(2, "0")}s`;
 }
 
 export function setCompactingStatus(state: PluginState, label: string | null): void {
