@@ -1,4 +1,7 @@
-import type { ExtensionContext, ReadonlyFooterDataProvider } from "@earendil-works/pi-coding-agent";
+import type {
+  ExtensionContext,
+  ReadonlyFooterDataProvider,
+} from "@earendil-works/pi-coding-agent";
 import type { TerminalSplitCompositor } from "./fixed-editor/terminal-split.ts";
 import type { AgentKitConfig } from "./config.ts";
 import type { ContinueFailureSnapshot } from "./continue-mode.ts";
@@ -62,7 +65,9 @@ export interface PluginState {
 }
 
 export type EditorFactory = (tui: any, theme: any, keybindings: any) => any;
-export type AgentKitEditorFactory = EditorFactory & { [AGENT_KIT_EDITOR_FACTORY]?: true };
+export type AgentKitEditorFactory = EditorFactory & {
+  [AGENT_KIT_EDITOR_FACTORY]?: true;
+};
 
 export const AGENT_KIT_EDITOR_FACTORY = Symbol("pi-agent-kit.editorFactory");
 
@@ -125,8 +130,7 @@ export function createPluginState(): PluginState {
   };
 }
 
-// Long dual-dot bounce track (● travels L→R→L across dim dots).
-const WORKING_BOUNCE_LEN = 6;
+const WORKING_SPINNER_FRAMES = ["⠋","⠙","⠹","⠸","⠼","⠴","⠦","⠧","⠇","⠏"] as const;
 const WORKING_TICK_MS = 100;
 
 function thinkingFgColor(level: string): string {
@@ -147,22 +151,6 @@ function thinkingFgColor(level: string): string {
   }
 }
 
-/** Build ping-pong frames: ●······· ·●······ … ·······● … ·●······ */
-function bounceFrames(length: number): string[] {
-  const n = Math.max(3, length);
-  const frames: string[] = [];
-  for (let i = 0; i < n; i += 1) {
-    frames.push("∙".repeat(i) + "●" + "∙".repeat(n - 1 - i));
-  }
-  // reverse without duplicating endpoints
-  for (let i = n - 2; i >= 1; i -= 1) {
-    frames.push("∙".repeat(i) + "●" + "∙".repeat(n - 1 - i));
-  }
-  return frames;
-}
-
-const WORKING_BOUNCE_FRAMES = bounceFrames(WORKING_BOUNCE_LEN);
-
 function stopStatusSpinnerTimer(state: PluginState): void {
   if (state.workingSpinnerTimer) {
     clearInterval(state.workingSpinnerTimer);
@@ -170,12 +158,13 @@ function stopStatusSpinnerTimer(state: PluginState): void {
   }
 }
 
-/** Keep bounce timer alive while working and/or compacting. */
+/** Keep spinner timer alive while working and/or compacting. */
 export function ensureStatusSpinner(state: PluginState): void {
   if (state.workingSpinnerTimer) return;
   state.workingSpinnerIndex = 0;
   state.workingSpinnerTimer = setInterval(() => {
-    state.workingSpinnerIndex = (state.workingSpinnerIndex + 1) % WORKING_BOUNCE_FRAMES.length;
+    state.workingSpinnerIndex =
+      (state.workingSpinnerIndex + 1) % WORKING_SPINNER_FRAMES.length;
     state.fixedEditorCompositor?.requestRepaint();
     state.tuiRef?.requestRender?.();
   }, WORKING_TICK_MS);
@@ -193,7 +182,10 @@ export function startWorkingSpinner(state: PluginState): void {
 
 export function stopWorkingSpinner(state: PluginState): void {
   if (state.workingStartedAt != null) {
-    state.lastWorkingElapsedMs = Math.max(0, Date.now() - state.workingStartedAt);
+    state.lastWorkingElapsedMs = Math.max(
+      0,
+      Date.now() - state.workingStartedAt,
+    );
     state.workingStartedAt = null;
   }
   state.isWorking = false;
@@ -201,8 +193,12 @@ export function stopWorkingSpinner(state: PluginState): void {
 }
 
 /** Live while working, else last frozen working duration. */
-export function getWorkingElapsedMs(state: PluginState, now = Date.now()): number {
-  if (state.workingStartedAt != null) return Math.max(0, now - state.workingStartedAt);
+export function getWorkingElapsedMs(
+  state: PluginState,
+  now = Date.now(),
+): number {
+  if (state.workingStartedAt != null)
+    return Math.max(0, now - state.workingStartedAt);
   return state.lastWorkingElapsedMs;
 }
 
@@ -215,7 +211,10 @@ export function formatWorkingElapsedMs(ms: number): string {
   return `${m}m ${String(s).padStart(2, "0")}s`;
 }
 
-export function setCompactingStatus(state: PluginState, label: string | null): void {
+export function setCompactingStatus(
+  state: PluginState,
+  label: string | null,
+): void {
   if (label) {
     state.isCompacting = true;
     state.compactingLabel = label;
@@ -238,7 +237,10 @@ export function stripAnsi(text: string): string {
  * Relocate built-in compaction loader lines out of statusContainer into external chrome.
  * Returns filtered lines + compacting label (null when not compacting).
  */
-export function peelCompactingStatusLines(lines: string[]): { filtered: string[]; label: string | null } {
+export function peelCompactingStatusLines(lines: string[]): {
+  filtered: string[];
+  label: string | null;
+} {
   const plain = lines.map((line) => stripAnsi(line));
   const idx = plain.findIndex((line) => /compact(ing)?/i.test(line));
   if (idx === -1) return { filtered: lines, label: null };
@@ -246,9 +248,10 @@ export function peelCompactingStatusLines(lines: string[]): { filtered: string[]
   // Drop spinner glyph when present: "⠋ Compacting context..." (not multi-word prefixes).
   const raw = plain[idx].trim();
   const spinnerPrefix = raw.match(/^(\S{1,2})\s+(.+)$/);
-  const label = (spinnerPrefix?.[2] && /compact/i.test(spinnerPrefix[2])
-    ? spinnerPrefix[2]
-    : raw) || "Compacting context...";
+  const label =
+    (spinnerPrefix?.[2] && /compact/i.test(spinnerPrefix[2])
+      ? spinnerPrefix[2]
+      : raw) || "Compacting context...";
 
   const filtered = lines.filter((_, i) => {
     const p = plain[i].trim();
@@ -263,8 +266,10 @@ export function workingSpinnerFrame(
   state: PluginState,
   theme?: { fg?: (color: string, text: string) => string } | null,
 ): string {
-  const frame = WORKING_BOUNCE_FRAMES[state.workingSpinnerIndex % WORKING_BOUNCE_FRAMES.length]
-    ?? "●" + "∙".repeat(WORKING_BOUNCE_LEN - 1);
+  const frame =
+    WORKING_SPINNER_FRAMES[
+      state.workingSpinnerIndex % WORKING_SPINNER_FRAMES.length
+    ] ?? "⠋";
   const color = thinkingFgColor(state.activeThinkingLevel || "off");
   try {
     return theme?.fg?.(color, frame) ?? frame;
