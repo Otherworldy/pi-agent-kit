@@ -1,6 +1,5 @@
 import { execFile } from "node:child_process";
 import { readFileSync } from "node:fs";
-import { EnvHttpProxyAgent, fetch as undiciFetch } from "undici";
 import type { NotificationChannelsConfig, TelegramNotificationChannelConfig } from "./config.ts";
 
 export type TaskCompletionNotificationStatus = "completed" | "aborted" | "error";
@@ -17,15 +16,6 @@ const SUBAGENT_ENV_KEYS = [
   "PI_SUBAGENT_RUN_ID",
   "PI_SUBAGENT_CHILD_AGENT",
   "PI_SUBAGENT_CHILD_INDEX",
-] as const;
-
-const PROXY_ENV_KEYS = [
-  "HTTPS_PROXY",
-  "https_proxy",
-  "HTTP_PROXY",
-  "http_proxy",
-  "ALL_PROXY",
-  "all_proxy",
 ] as const;
 
 type Env = NodeJS.ProcessEnv;
@@ -70,16 +60,9 @@ export interface TaskCompletionNotificationCoalescingOptions {
   send?: TaskCompletionNotificationSender;
 }
 
-let telegramProxyAgent: EnvHttpProxyAgent | undefined;
-
-function hasProxyEnv(env: Env = process.env): boolean {
-  return PROXY_ENV_KEYS.some((key) => Boolean(env[key]));
-}
-
+// ponytail: global fetch; HTTP(S)_PROXY needs NODE_USE_ENV_PROXY=1 (Node 22.13+) or undici again
 function defaultTelegramFetch(url: string, init: Parameters<TelegramFetch>[1]): Promise<TelegramFetchResponse> {
-  const dispatcher = hasProxyEnv() ? telegramProxyAgent ??= new EnvHttpProxyAgent() : undefined;
-  const requestInit = dispatcher ? { ...init, dispatcher } : init;
-  return undiciFetch(url, requestInit as any) as unknown as Promise<TelegramFetchResponse>;
+  return fetch(url, init);
 }
 
 function getArgValue(argv: readonly string[], flag: string): string | undefined {

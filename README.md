@@ -24,6 +24,7 @@ The settings panel includes:
 - Mouse scroll
 - Extension status
 - Editor chrome
+- Git status
 - Local task notification
 - Telegram task notification
 - Provider compatibility
@@ -31,44 +32,50 @@ The settings panel includes:
 
 ## Settings file
 
-Global: `~/.pi/agent/settings.json`
+**Primary (recommended):** `~/.pi/agent/extensions/pi-agent-kit/config.json`  
+(legacy typo path also accepted: `~/.pi/agent/extensions/pi-agent-ket/config.json`)
 
-Project: `.pi/settings.json`
+Also merged (later wins): global `~/.pi/agent/settings.json` → `agentKit`, project `.pi/settings.json` → `agentKit`.
+
+Extension config is **flat** (not nested under `agentKit`):
 
 ```json
 {
-  "agentKit": {
-    "fixedEditor": true,
-    "mouseScroll": true,
-    "showExtensionStatus": true,
-    "notificationChannels": {
-      "windowsToast": {
-        "enabled": true
-      },
-      "telegram": {
-        "enabled": false,
-        "botToken": "123456:example",
-        "chatId": "123456789",
-        "apiBaseUrl": "https://api.telegram.org",
-        "timeoutMs": 5000
-      }
-    },
-    "editorChrome": true,
-    "providerCompat": {
+  "fixedEditor": true,
+  "mouseScroll": true,
+  "showExtensionStatus": true,
+  "showGitStatus": true,
+  "notificationChannels": {
+    "windowsToast": {
       "enabled": true
     },
-    "fast": {
+    "telegram": {
       "enabled": false,
-      "persistState": true,
-      "serviceTier": "priority",
-      "supportedModels": [
-        "openai/gpt-5.4",
-        "openai/gpt-5.5",
-        "openai-codex/gpt-5.4",
-        "openai-codex/gpt-5.5",
-        "my-openai/gpt-5.5"
-      ]
+      "botToken": "123456:example",
+      "chatId": "123456789",
+      "apiBaseUrl": "https://api.telegram.org",
+      "timeoutMs": 5000
     }
+  },
+  "editorChrome": true,
+  "chrome": {
+    "left": ["model", "thinking", "timer", "providerCompat", "fast"],
+    "right": ["cost", "context"]
+  },
+  "providerCompat": {
+    "enabled": true
+  },
+  "fast": {
+    "enabled": false,
+    "persistState": true,
+    "serviceTier": "priority",
+    "supportedModels": [
+      "openai/gpt-5.4",
+      "openai/gpt-5.5",
+      "openai-codex/gpt-5.4",
+      "openai-codex/gpt-5.5",
+      "my-openai/gpt-5.5"
+    ]
   }
 }
 ```
@@ -77,11 +84,11 @@ Project: `.pi/settings.json`
 
 ## Fixed editor and editor chrome
 
-The fixed editor keeps the input cluster at the bottom of the terminal while chat output scrolls above it. `editorChrome` shows the current model, thinking level, working directory, git branch, git change summary, provider compatibility label, fast mode label, and context usage directly on the input box border, inspired by `amp-themes`.
+The fixed editor keeps the input cluster at the bottom of the terminal while chat output scrolls above it. `editorChrome` restyles the input as a solid gray panel with a left `▌` rail colored by thinking level, or green in bash (`!`) mode (no top/bottom `─` borders), equal side insets, and a bottom meta line. Layout is controlled by `agentKit.chrome.left` / `agentKit.chrome.right` slot arrays (order = display order; omit a slot to hide it). Available slots: `model`, `thinking`, `timer` (last agent working duration, live while working), `providerCompat`, `fast`, `context` (`34k/500k`), `cost`. Default: left `model · thinking · timer · providerCompat · fast`, right `cost · context`. Outside the panel: dual-dot bounce on the bottom-left for agent working (`esc interrupt`) and context compaction (`Compacting context...`), and optional `showGitStatus` git branch/changes on the bottom-right. Sent user messages use the same solid gray panel + `▌` rail styling as the input box.
 
 ## Task completion notification
 
-On native Windows, and on Windows 11 WSL with `powershell.exe`/WSL interop available, the extension can send a local toast notification when the main interactive Pi Agent finishes a task. Telegram push can also be enabled as an additional notification channel. Successful tasks send the final assistant answer, errors send a fixed failure message, and user-aborted tasks do not send a notification. Error notifications are delayed briefly and coalesced so short retry bursts produce one failure notification instead of one per failed attempt.
+On native Windows, and on Windows 11 WSL with `powershell.exe`/WSL interop available, the extension can send a local toast notification when the main interactive Pi Agent finishes a task. Telegram push can also be enabled as an additional notification channel. Successful tasks send the final assistant answer, errors send a fixed failure message, and user-aborted tasks do not send a notification. Error notifications are delayed and coalesced; if the agent auto-retries (or otherwise starts another run), the pending error notification is cancelled so only a final stop notifies.
 
 Subagent processes are skipped via the `PI_SUBAGENT_*` environment markers used by `pi-subagents`, with a JSON print-mode fallback guard. Local and Telegram notifications can be enabled separately in `/agent-kit`. If no toast appears in WSL, check `command -v powershell.exe` and Windows notification / Do Not Disturb settings.
 
@@ -126,7 +133,7 @@ For a Pi custom provider, keep your provider registration as-is, then add its `p
 
 ## Provider compatibility
 
-Some Claude/NewAPI-compatible gateways validate that requests look like Claude Code CLI, and QuantumNous/new-api also includes Codex CLI channel-affinity/header passthrough templates. Provider compatibility is enabled by default; toggle `Provider compatibility` in `/agent-kit` if you want to restore normal provider requests for the current session. When active, the editor chrome shows `CC` or `Codex` next to the thinking level.
+Some Claude/NewAPI-compatible gateways validate that requests look like Claude Code CLI, and QuantumNous/new-api also includes Codex CLI channel-affinity/header passthrough templates. Provider compatibility is enabled by default; toggle `Provider compatibility` in `/agent-kit` if you want to restore normal provider requests for the current session. When active, the editor chrome shows `⇄ CC` or `⇄ Codex` next to the thinking level.
 
 `settings.json` only needs the headers you want to override; all omitted headers use built-in Claude Code or Codex CLI defaults:
 
@@ -135,10 +142,10 @@ Some Claude/NewAPI-compatible gateways validate that requests look like Claude C
   "agentKit": {
     "providerCompat": {
       "claudeCodeHeaders": {
-        "User-Agent": "claude-cli/2.1.75 (external, cli)"
+        "User-Agent": "claude-cli/2.1.212 (external, cli)"
       },
       "codexHeaders": {
-        "User-Agent": "codex_cli_rs/0.132.0 (linux; x64) node",
+        "User-Agent": "codex_cli_rs/0.144.5 (Linux 6.8.0; x86_64) unknown",
         "X-Codex-Beta-Features": "remote_compaction_v2"
       }
     }
@@ -146,7 +153,7 @@ Some Claude/NewAPI-compatible gateways validate that requests look like Claude C
 }
 ```
 
-Claude-like models automatically receive Claude Code headers and the Claude Code identity system text. Codex/OpenAI-compatible models automatically receive Codex CLI headers (`Originator`, `Session_id`, `User-Agent`, `OpenAI-Beta`, `X-Codex-Beta-Features`, and `X-Codex-Turn-Metadata`); session fields and a missing Responses `prompt_cache_key` use Pi's real session ID. Existing payload IDs, including `client_metadata.x-codex-installation-id`, are preserved rather than replaced with placeholders. Existing provider headers are preserved and compatibility headers override duplicates while the plugin-page switch is on. Run `/fast reload` after editing header overrides to reload fast mode and provider compatibility settings without changing the plugin-page switch state.
+Claude-like models automatically receive Claude Code headers generated like the official client (`User-Agent` = `claude-cli/{version} (external, cli)`, `X-App`, Stainless platform headers, `Anthropic-Version` / `Anthropic-Beta`, plus `X-Claude-Code-Session-Id` from Pi's session), the Claude Code identity system text, and a `metadata.user_id` JSON body field (`device_id` + Pi session) for gateway client checks. Override with `claudeCodeCompat.metadataUserId` if needed. Codex/OpenAI-compatible models automatically receive Codex CLI headers generated like the official client: `Originator` / `User-Agent` (`{originator}/{version} ({os} {os_version}; {arch}) {terminal}`), `session-id` + `thread-id` (and legacy `Session_id` / `Thread_id`), `X-Client-Request-Id`, `X-Codex-Window-Id`, `OpenAI-Beta`, optional `X-Codex-Beta-Features`, and `X-Codex-Turn-Metadata`. Session fields and a missing Responses `prompt_cache_key` use Pi's real session ID. Body also gets official-style `client_metadata` (`x-codex-installation-id` + session/thread/window/turn); existing `x-codex-installation-id` is preserved. Override installation id with `PI_CODEX_COMPAT_INSTALLATION_ID`. Existing provider headers are preserved and compatibility headers override duplicates while the plugin-page switch is on. Run `/fast reload` after editing header overrides to reload fast mode and provider compatibility settings without changing the plugin-page switch state.
 
 Nested header config is also accepted if you prefer grouping by profile:
 
@@ -156,7 +163,7 @@ Nested header config is also accepted if you prefer grouping by profile:
     "providerCompat": {
       "claudeCode": {
         "headers": {
-          "User-Agent": "claude-cli/2.1.75 (external, cli)"
+          "User-Agent": "claude-cli/2.1.212 (external, cli)"
         }
       },
       "codex": {

@@ -41,8 +41,5 @@
     "extensions": [
       "./src/index.ts"
     ]
-  },
-  "dependencies": {
-    "undici": "^7.27.1"
   }
 }
