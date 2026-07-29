@@ -157,6 +157,18 @@ test("fixed cluster paint clears bottom rows and positions hardware cursor", () 
   assert.ok(paint.endsWith("\x1b[10;3H\x1b[?25h"));
 });
 
+// IME candidate windows track the hardware cursor even when it is hidden.
+test("fixed cluster paint parks hidden hardware cursor for IME", () => {
+  const paint = buildFixedClusterPaint(
+    { lines: ["top", "edit"], cursor: { row: 1, col: 2 } },
+    10,
+    20,
+    false,
+  );
+
+  assert.ok(paint.endsWith("\x1b[10;3H\x1b[?25l"));
+});
+
 test("terminal split reserves rows, hides root renderables, repaints, and cleans up", () => {
   const terminal = new FakeTerminal();
   const hidden = {

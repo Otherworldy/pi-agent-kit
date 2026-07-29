@@ -303,9 +303,13 @@ export function buildFixedClusterPaint(
     buffer += sanitizeLine(cluster.lines[i] ?? "", width);
   }
 
-  if (cluster.cursor && showHardwareCursor) {
+  // Always park the hardware cursor on the editor caret so IME candidate
+  // windows (CJK etc.) track the input. Visibility is separate — same as pi-tui
+  // positionHardwareCursor: move always, show/hide based on the flag.
+  // Without this, full-width chrome lines leave the cursor at the right edge.
+  if (cluster.cursor) {
     buffer += moveCursor(startRow + cluster.cursor.row, Math.max(1, cluster.cursor.col + 1));
-    buffer += showCursor();
+    buffer += showHardwareCursor ? showCursor() : hideCursor();
   } else {
     buffer += hideCursor();
   }
