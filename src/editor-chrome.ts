@@ -182,6 +182,8 @@ function thinkingColor(level: string): ThemeColor {
       return "thinkingHigh";
     case "xhigh":
       return "thinkingXhigh";
+    case "max":
+      return "thinkingMax";
     case "off":
     default:
       return "thinkingOff";

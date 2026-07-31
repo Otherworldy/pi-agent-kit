@@ -145,6 +145,8 @@ function thinkingFgColor(level: string): string {
       return "thinkingHigh";
     case "xhigh":
       return "thinkingXhigh";
+    case "max":
+      return "thinkingMax";
     case "off":
     default:
       return "thinkingOff";
