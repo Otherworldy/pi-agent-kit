@@ -173,7 +173,7 @@ export default function agentKitPlugin(pi: ExtensionAPI) {
       setupEditorBound(ctx);
     } else if (key === "mouseScroll") {
       reinstallFixedEditorBound(ctx, { force: true });
-    } else if (key === "showExtensionStatus" || key === "editorChrome" || key === "showGitStatus") {
+    } else if (key === "showExtensionStatus" || key === "editorChrome" || key === "showGitStatus" || key === "showProjectDir") {
       if (key === "editorChrome") {
         try {
           ctx.ui.setWorkingVisible?.(!value);

@@ -85,6 +85,13 @@ export class AgentKitSettingsPanel extends Container {
         values: ["true", "false"],
       },
       {
+        id: "showProjectDir",
+        label: "Project directory",
+        description: "Show the current project folder name at the bottom-right next to git status.",
+        currentValue: options.config.showProjectDir ? "true" : "false",
+        values: ["true", "false"],
+      },
+      {
         id: "notificationChannels.windowsToast.enabled",
         label: "Local task notification",
         description: "Send a Windows toast notification when the main interactive Pi Agent finishes a task.",

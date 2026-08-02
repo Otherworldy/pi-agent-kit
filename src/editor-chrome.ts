@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { basename } from "node:path";
 import type { ThemeColor } from "@earendil-works/pi-coding-agent";
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import type { EditorChromeDisplayConfig, EditorChromeSlot } from "./config.ts";
@@ -40,6 +41,7 @@ export interface EditorChromeRenderInput {
   /** Last/live working elapsed text for the `timer` chrome slot, e.g. `12s`. */
   workingElapsedLabel?: string;
   showGitStatus?: boolean;
+  showProjectDir?: boolean;
   /** Meta layout: left/right slot lists (order = display order). */
   display?: EditorChromeDisplayConfig;
   /** Left-outside working label, e.g. "⠋ working". Empty when idle. */
@@ -444,27 +446,44 @@ function buildMetaLine(
   return packLeftRight(left, right, width);
 }
 
-/** Status row outside the input panel: working (left) · git (right). */
+/** Current project folder name, e.g. `pi-agent-kit`. */
+function formatProjectDirLabel(theme: ThemeLike | undefined, cwd: string, maxWidth: number): string {
+  const name = basename(cwd) || cwd;
+  const label = fg(theme, META_LIGHT, name);
+  if (visibleWidth(label) <= maxWidth) return label;
+  return truncateToWidth(label, Math.max(0, maxWidth), "…");
+}
+
+/** Status row outside the input panel: working (left) · projectDir + git (right). */
 function buildExternalStatusLine(
   context: EditorChromeContextLike,
   width: number,
-  options: { showGitStatus?: boolean; workingLabel?: string },
+  options: { showGitStatus?: boolean; showProjectDir?: boolean; workingLabel?: string },
 ): string {
   const theme = context.ui?.theme;
   const working = options.workingLabel?.trim() ? options.workingLabel.trim() : "";
   const git = options.showGitStatus
     ? formatGitLabel(theme, getGitInfo(context.cwd ?? process.cwd()), width)
     : "";
+  const separator = fg(theme, "dim", " · ");
+  const projectDir = options.showProjectDir
+    ? formatProjectDirLabel(
+      theme,
+      context.cwd ?? process.cwd(),
+      git ? Math.max(0, width - visibleWidth(git) - visibleWidth(separator)) : width,
+    )
+    : "";
+  const right = [projectDir, git].filter(Boolean).join(separator);
 
-  if (!working && !git) return "";
-  if (!git) return padLine(working, width);
+  if (!working && !right) return "";
+  if (!right) return padLine(working, width);
   if (!working) {
-    const pad = Math.max(0, width - visibleWidth(git));
-    return " ".repeat(pad) + git;
+    const pad = Math.max(0, width - visibleWidth(right));
+    return " ".repeat(pad) + right;
   }
 
-  const gap = Math.max(1, width - visibleWidth(working) - visibleWidth(git));
-  return padLine(`${working}${" ".repeat(gap)}${git}`, width);
+  const gap = Math.max(1, width - visibleWidth(working) - visibleWidth(right));
+  return padLine(`${working}${" ".repeat(gap)}${right}`, width);
 }
 
 function paintPanelLine(
@@ -512,6 +531,7 @@ export function renderEditorChrome(input: EditorChromeRenderInput): string[] {
   );
   const externalStatus = buildExternalStatusLine(input.context, width, {
     showGitStatus: input.showGitStatus,
+    showProjectDir: input.showProjectDir,
     workingLabel: input.workingLabel,
   });
 

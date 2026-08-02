@@ -78,6 +78,7 @@ export interface AgentKitConfig {
   mouseScroll: boolean;
   showExtensionStatus: boolean;
   showGitStatus: boolean;
+  showProjectDir: boolean;
   taskCompletionNotification: boolean;
   notificationChannels: NotificationChannelsConfig;
   editorChrome: boolean;
@@ -94,6 +95,7 @@ export type AgentKitBooleanSettingKey =
   | "mouseScroll"
   | "showExtensionStatus"
   | "showGitStatus"
+  | "showProjectDir"
   | "taskCompletionNotification"
   | "notificationChannels.windowsToast.enabled"
   | "notificationChannels.telegram.enabled"
@@ -256,6 +258,7 @@ const DEFAULT_CONFIG: AgentKitConfig = {
     left: ["model", "thinking", "timer", "providerCompat", "fast"],
     right: ["cost", "context"],
   },
+  showProjectDir: true,
   fast: {
     enabled: false,
     persistState: true,
@@ -617,6 +620,8 @@ export function parseAgentKitConfig(settings: Record<string, unknown>): AgentKit
       ?? DEFAULT_CONFIG.showExtensionStatus,
     showGitStatus: boolFromObject(agentKit, "showGitStatus")
       ?? DEFAULT_CONFIG.showGitStatus,
+    showProjectDir: boolFromObject(agentKit, "showProjectDir")
+      ?? DEFAULT_CONFIG.showProjectDir,
     taskCompletionNotification: boolFromObject(agentKit, "taskCompletionNotification")
       ?? DEFAULT_CONFIG.taskCompletionNotification,
     notificationChannels: parseNotificationChannelsConfig(agentKit),

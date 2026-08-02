@@ -1010,3 +1010,54 @@ test("editor chrome timer slot can be placed, reordered, or hidden", () => {
   });
   assert.equal(hidden.some((line) => line.includes("12s")), false);
 });
+
+test("editor chrome shows project dir left of git status, hides via showProjectDir", () => {
+  const root = mkdtempSync(join(tmpdir(), "pi-agent-kit-dir-"));
+  const repo = join(root, "my-project");
+  mkdirSync(repo, { recursive: true });
+  execFileSync("git", ["init", "-b", "main"], { cwd: repo, stdio: "ignore" });
+
+  try {
+    clearEditorChromeGitCache();
+    const theme = { fg: (_kind: string, text: string) => text };
+    const base = {
+      width: 100,
+      enabled: true as const,
+      thinkingLevel: "off",
+      renderBase: (width: number) => ["─".repeat(width), "body".padEnd(width), "─".repeat(width)],
+      context: {
+        cwd: repo,
+        model: { id: "m" },
+        ui: { theme },
+      },
+    };
+
+    const withDir = renderEditorChrome({
+      ...base,
+      showProjectDir: true,
+      showGitStatus: true,
+    });
+    const line = withDir.find((l) => l.includes("my-project") && l.includes("main")) ?? "";
+    const plain = line.replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, "").trimEnd();
+    assert.ok(plain.indexOf("my-project") < plain.indexOf("main"), `dir should sit left of git: ${plain}`);
+
+    const dirOnly = renderEditorChrome({
+      ...base,
+      showProjectDir: true,
+      showGitStatus: false,
+    });
+    const dirPlain = (dirOnly.find((l) => l.includes("my-project")) ?? "")
+      .replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, "")
+      .trimEnd();
+    assert.ok(dirPlain.endsWith("my-project"));
+
+    const hidden = renderEditorChrome({
+      ...base,
+      showProjectDir: false,
+      showGitStatus: true,
+    });
+    assert.equal(hidden.some((l) => l.includes("my-project")), false);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

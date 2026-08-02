@@ -50,6 +50,7 @@ export function wrapEditorFactory(
           fastLabel: getFastChromeLabel(state.activeCtxRef, state.currentModelRef, state.fastDesired, config.fast.supportedModels),
           workingElapsedLabel: formatWorkingElapsedMs(getWorkingElapsedMs(state)),
           showGitStatus: config.showGitStatus,
+          showProjectDir: config.showProjectDir,
           display: config.chrome,
           workingLabel,
           borderColor: editor.borderColor,
