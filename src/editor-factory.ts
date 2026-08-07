@@ -4,19 +4,17 @@ import type { AgentKitConfig } from "./config.ts";
 import { AGENT_KIT_EDITOR_FACTORY, formatWorkingElapsedMs, getWorkingElapsedMs, workingSpinnerFrame } from "./plugin-state.ts";
 import { renderEditorChrome } from "./editor-chrome.ts";
 import { getFastChromeLabel, getProviderCompatChromeLabel } from "./status-updater.ts";
-import { findContainerWithChild } from "./utils.ts";
 
 /**
- * 包装编辑器工厂，添加Chrome装饰和固定编辑器支持
+ * 包装编辑器工厂，添加 editor chrome 装饰
  */
 export function wrapEditorFactory(
-  ctx: any,
   state: PluginState,
   config: AgentKitConfig,
   factory: EditorFactory | undefined,
-  installWhenTuiReady: (ctx: any, tui: any) => void,
 ): AgentKitEditorFactory {
   const wrapped = ((tui: any, theme: any, keybindings: any) => {
+    state.tuiRef = tui;
     const editor = factory
       ? factory(tui, theme, keybindings)
       : new CustomEditor(tui, theme, keybindings);
@@ -26,11 +24,7 @@ export function wrapEditorFactory(
       editor.render = (width: number) => {
         const theme = state.activeCtxRef?.ui?.theme as { fg?: (color: string, text: string) => string } | undefined;
         let workingLabel = "";
-        const statusText = state.isCompacting
-          ? (state.compactingLabel || "Compacting context... (escape to cancel)")
-          : state.isWorking
-            ? "esc interrupt"
-            : "";
+        const statusText = state.isWorking ? "esc interrupt" : "";
         if (statusText) {
           const bounce = workingSpinnerFrame(state, theme);
           let text = statusText;
@@ -59,27 +53,6 @@ export function wrapEditorFactory(
       };
     }
 
-    state.currentEditor = editor;
-
-    // 拦截onSubmit，在提交时跳转到底部
-    let inheritedOnSubmit = editor.onSubmit;
-    Object.defineProperty(editor, "onSubmit", {
-      configurable: true,
-      get: () => inheritedOnSubmit,
-      set(handler: unknown) {
-        inheritedOnSubmit = typeof handler === "function"
-          ? (text: string) => {
-            state.fixedEditorCompositor?.jumpToRootBottom();
-            handler(text);
-          }
-          : handler;
-      },
-    });
-
-    if (config.fixedEditor) {
-      installWhenTuiReady(ctx, tui);
-    }
-
     return editor;
   }) as AgentKitEditorFactory;
 
@@ -88,20 +61,12 @@ export function wrapEditorFactory(
 }
 
 /**
- * 检查当前编辑器是否已挂载
- */
-export function isCurrentEditorMounted(state: PluginState): boolean {
-  return Boolean(state.tuiRef && state.currentEditor && findContainerWithChild(state.tuiRef, state.currentEditor));
-}
-
-/**
- * 确保编辑器工厂已安装
+ * 确保 editor factory wrapper 已安装
  */
 export function ensureEditorFactoryInstalled(
   ctx: any,
   state: PluginState,
   config: AgentKitConfig,
-  installWhenTuiReady: (ctx: any, tui: any) => void,
 ): void {
   const existingFactory = ctx.ui.getEditorComponent?.() as AgentKitEditorFactory | undefined;
   if (existingFactory !== undefined && existingFactory[AGENT_KIT_EDITOR_FACTORY] !== true) {
@@ -109,8 +74,8 @@ export function ensureEditorFactoryInstalled(
     state.wrappedEditorFactory = undefined;
   }
 
-  state.wrappedEditorFactory ??= wrapEditorFactory(ctx, state, config, state.originalEditorFactory, installWhenTuiReady);
-  if (existingFactory !== state.wrappedEditorFactory || !isCurrentEditorMounted(state)) {
+  state.wrappedEditorFactory ??= wrapEditorFactory(state, config, state.originalEditorFactory);
+  if (existingFactory !== state.wrappedEditorFactory) {
     ctx.ui.setEditorComponent(state.wrappedEditorFactory);
   }
 }

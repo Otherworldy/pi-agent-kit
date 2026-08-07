@@ -1,8 +1,8 @@
 # pi-agent-kit
 
-Pi Agent terminal productivity kit with a fixed editor/input cluster, editor chrome, task completion notifications, fast mode, and provider compatibility helpers.
+Pi Agent terminal productivity kit with editor chrome, task completion notifications, fast mode, and provider compatibility helpers.
 
-Based on the fixed editor cluster idea from [`nicobailon/pi-powerline-footer`](https://github.com/nicobailon/pi-powerline-footer).
+Pi v0.84 fullscreen owns the fixed bottom input and chat scrolling; this plugin adds chrome and the non-layout features below.
 
 ## Install
 
@@ -20,9 +20,6 @@ pi install -l D:/Study/Code/Node/pi-agent-kit
 
 The settings panel includes:
 
-- Fixed editor
-- Mouse scroll
-- Extension status
 - Editor chrome
 - Git status
 - Local task notification
@@ -41,9 +38,6 @@ Extension config is **flat** (not nested under `agentKit`):
 
 ```json
 {
-  "fixedEditor": true,
-  "mouseScroll": true,
-  "showExtensionStatus": true,
   "showGitStatus": true,
   "notificationChannels": {
     "windowsToast": {
@@ -80,11 +74,9 @@ Extension config is **flat** (not nested under `agentKit`):
 }
 ```
 
-`powerline.fixedEditor` and `powerline.mouseScroll` are also read as compatibility aliases.
+## Editor chrome
 
-## Fixed editor and editor chrome
-
-The fixed editor keeps the input cluster at the bottom of the terminal while chat output scrolls above it. `editorChrome` restyles the input as a solid gray panel with a left `▌` rail colored by thinking level, or green in bash (`!`) mode (no top/bottom `─` borders), equal side insets, and a bottom meta line. Layout is controlled by `agentKit.chrome.left` / `agentKit.chrome.right` slot arrays (order = display order; omit a slot to hide it). Available slots: `model`, `thinking`, `timer` (last agent working duration, live while working), `providerCompat`, `fast`, `context` (`34k/500k`), `cost`. Default: left `model · thinking · timer · providerCompat · fast`, right `cost · context`. Outside the panel: dual-dot bounce on the bottom-left for agent working (`esc interrupt`) and context compaction (`Compacting context...`), and the current project folder name (`showProjectDir`, left) next to the optional `showGitStatus` git branch/changes on the bottom-right. Sent user messages use the same solid gray panel + `▌` rail styling as the input box.
+Pi v0.84 fullscreen provides the fixed bottom editor and chat scrolling. The plugin hides Pi's native footer to avoid repeating model, context, project, and extension-status lines already represented by the chrome. `editorChrome` restyles the native input as a solid gray panel with a left `▌` rail colored by thinking level, or green in bash (`!`) mode, equal side insets, and a bottom meta line. Layout is controlled by `agentKit.chrome.left` / `agentKit.chrome.right` slot arrays (order = display order; omit a slot to hide it). Available slots: `model`, `thinking`, `timer` (last agent working duration, live while working), `providerCompat`, `fast`, `context` (`34k/500k`), `cost`. Default: left `model · thinking · timer · providerCompat · fast`, right `cost · context`. The plugin also keeps the working indicator, project directory, optional git branch/changes, and matching sent-user-message styling; Pi's native fullscreen dock handles compaction status.
 
 ## Task completion notification
 
@@ -178,4 +170,4 @@ Nested header config is also accepted if you prefer grouping by profile:
 
 ## Notes
 
-This is terminal/TUI code, not CSS. It uses ANSI scroll regions and a bottom compositor copied/adapted from `pi-powerline-footer` at commit `22dc838dcd5489806bbb41e0df773d2eda6fe5e1`.
+Bottom-editor placement and scrolling are delegated to Pi v0.84 fullscreen. The extension only replaces Pi's native footer with an empty footer to avoid duplicate status information; it does not install terminal input, scroll-region, or compositor hooks.

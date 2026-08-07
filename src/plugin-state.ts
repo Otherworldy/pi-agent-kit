@@ -1,9 +1,4 @@
-import type {
-  ExtensionContext,
-  ReadonlyFooterDataProvider,
-} from "@earendil-works/pi-coding-agent";
-import type { TerminalSplitCompositor } from "./fixed-editor/terminal-split.ts";
-import type { AgentKitConfig } from "./config.ts";
+import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { ContinueFailureSnapshot } from "./continue-mode.ts";
 
 /**
@@ -11,29 +6,13 @@ import type { ContinueFailureSnapshot } from "./continue-mode.ts";
  * 封装所有模块级变量，避免全局状态污染
  */
 export interface PluginState {
-  // TUI和编辑器引用
+  // TUI引用
   tuiRef: any | null;
-  currentEditor: any | null;
   activeCtxRef: ExtensionContext | null;
-  footerDataRef: ReadonlyFooterDataProvider | null;
 
   // 编辑器工厂
   originalEditorFactory: EditorFactory | undefined;
   wrappedEditorFactory: AgentKitEditorFactory | undefined;
-
-  // Compositor状态
-  fixedEditorCompositor: TerminalSplitCompositor | null;
-  fixedStatusContainer: any | null;
-  fixedEditorContainer: any | null;
-  fixedWidgetContainerAbove: any | null;
-  fixedWidgetContainerBelow: any | null;
-
-  // 安装重试状态
-  needsFixedEditorReinstall: boolean;
-  installRetryQueued: boolean;
-  installRetryAttempts: number;
-  installRetryTimer: ReturnType<typeof setTimeout> | null;
-  installStabilizationTimers: Set<ReturnType<typeof setTimeout>>;
 
   // 模型和配置状态
   activeThinkingLevel: string;
@@ -54,8 +33,6 @@ export interface PluginState {
   workingStartedAt: number | null;
   /** 上一次 working 冻结时长；idle 时持续展示 */
   lastWorkingElapsedMs: number;
-  isCompacting: boolean;
-  compactingLabel: string | null;
   workingSpinnerIndex: number;
   workingSpinnerTimer: ReturnType<typeof setInterval> | null;
 
@@ -96,21 +73,9 @@ function clearTaskCompletionErrorNotificationTimer(state: PluginState): void {
 export function createPluginState(): PluginState {
   return {
     tuiRef: null,
-    currentEditor: null,
     activeCtxRef: null,
-    footerDataRef: null,
     originalEditorFactory: undefined,
     wrappedEditorFactory: undefined,
-    fixedEditorCompositor: null,
-    fixedStatusContainer: null,
-    fixedEditorContainer: null,
-    fixedWidgetContainerAbove: null,
-    fixedWidgetContainerBelow: null,
-    needsFixedEditorReinstall: false,
-    installRetryQueued: false,
-    installRetryAttempts: 0,
-    installRetryTimer: null,
-    installStabilizationTimers: new Set(),
     activeThinkingLevel: "off",
     currentModelRef: null,
     fastDesired: false,
@@ -121,8 +86,6 @@ export function createPluginState(): PluginState {
     isWorking: false,
     workingStartedAt: null,
     lastWorkingElapsedMs: 0,
-    isCompacting: false,
-    compactingLabel: null,
     workingSpinnerIndex: 0,
     workingSpinnerTimer: null,
     lastContinueFailure: null,
@@ -167,13 +130,12 @@ export function ensureStatusSpinner(state: PluginState): void {
   state.workingSpinnerTimer = setInterval(() => {
     state.workingSpinnerIndex =
       (state.workingSpinnerIndex + 1) % WORKING_SPINNER_FRAMES.length;
-    state.fixedEditorCompositor?.requestRepaint();
     state.tuiRef?.requestRender?.();
   }, WORKING_TICK_MS);
 }
 
 function maybeStopStatusSpinner(state: PluginState): void {
-  if (!state.isWorking && !state.isCompacting) stopStatusSpinnerTimer(state);
+  if (!state.isWorking) stopStatusSpinnerTimer(state);
 }
 
 export function startWorkingSpinner(state: PluginState): void {
@@ -213,57 +175,6 @@ export function formatWorkingElapsedMs(ms: number): string {
   return `${m}m ${String(s).padStart(2, "0")}s`;
 }
 
-export function setCompactingStatus(
-  state: PluginState,
-  label: string | null,
-): void {
-  if (label) {
-    state.isCompacting = true;
-    state.compactingLabel = label;
-    ensureStatusSpinner(state);
-    return;
-  }
-  state.isCompacting = false;
-  state.compactingLabel = null;
-  maybeStopStatusSpinner(state);
-}
-
-/** Strip ANSI + OSC sequences for plain-text matching. */
-export function stripAnsi(text: string): string {
-  return text
-    .replace(/\][^\u0007]*\u0007/g, "")
-    .replace(/\[[0-9;?]*[ -/]*[@-~]/g, "");
-}
-
-/**
- * Relocate built-in compaction loader lines out of statusContainer into external chrome.
- * Returns filtered lines + compacting label (null when not compacting).
- */
-export function peelCompactingStatusLines(lines: string[]): {
-  filtered: string[];
-  label: string | null;
-} {
-  const plain = lines.map((line) => stripAnsi(line));
-  const idx = plain.findIndex((line) => /compact(ing)?/i.test(line));
-  if (idx === -1) return { filtered: lines, label: null };
-
-  // Drop spinner glyph when present: "⠋ Compacting context..." (not multi-word prefixes).
-  const raw = plain[idx].trim();
-  const spinnerPrefix = raw.match(/^(\S{1,2})\s+(.+)$/);
-  const label =
-    (spinnerPrefix?.[2] && /compact/i.test(spinnerPrefix[2])
-      ? spinnerPrefix[2]
-      : raw) || "Compacting context...";
-
-  const filtered = lines.filter((_, i) => {
-    const p = plain[i].trim();
-    if (!p) return false; // Loader adds a blank pad line
-    if (/compact(ing)?/i.test(p)) return false;
-    return true;
-  });
-  return { filtered, label };
-}
-
 export function workingSpinnerFrame(
   state: PluginState,
   theme?: { fg?: (color: string, text: string) => string } | null,
@@ -286,12 +197,7 @@ export function workingSpinnerFrame(
 export function resetPluginState(state: PluginState): void {
   clearTaskCompletionErrorNotificationTimer(state);
   stopWorkingSpinner(state);
-  setCompactingStatus(state, null);
-  state.needsFixedEditorReinstall = false;
-  state.installRetryAttempts = 0;
-  state.currentEditor = null;
   state.tuiRef = null;
-  state.footerDataRef = null;
   state.lastContinueFailure = null;
   state.pendingContinueRequest = null;
 }
@@ -302,15 +208,11 @@ export function resetPluginState(state: PluginState): void {
 export function cleanupPluginState(state: PluginState): void {
   clearTaskCompletionErrorNotificationTimer(state);
   stopWorkingSpinner(state);
-  setCompactingStatus(state, null);
-  state.installRetryAttempts = 0;
   state.registeredClaudeCodeCompatProviders = new Set();
   state.registeredCodexCompatProviders = new Set();
   state.previousCompatProviderConfigs.clear();
   state.tuiRef = null;
-  state.currentEditor = null;
   state.activeCtxRef = null;
-  state.footerDataRef = null;
   state.currentModelRef = null;
   state.lastContinueFailure = null;
   state.pendingContinueRequest = null;

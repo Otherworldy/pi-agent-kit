@@ -74,9 +74,6 @@ export interface EditorChromeDisplayConfig {
 }
 
 export interface AgentKitConfig {
-  fixedEditor: boolean;
-  mouseScroll: boolean;
-  showExtensionStatus: boolean;
   showGitStatus: boolean;
   showProjectDir: boolean;
   taskCompletionNotification: boolean;
@@ -91,9 +88,6 @@ export interface AgentKitConfig {
 }
 
 export type AgentKitBooleanSettingKey =
-  | "fixedEditor"
-  | "mouseScroll"
-  | "showExtensionStatus"
   | "showGitStatus"
   | "showProjectDir"
   | "taskCompletionNotification"
@@ -238,9 +232,6 @@ export const DEFAULT_CODEX_COMPAT_HEADERS = {
 export const DEFAULT_CODEX_SYSTEM_TEXT = "You are Codex CLI, OpenAI's official coding agent.";
 
 const DEFAULT_CONFIG: AgentKitConfig = {
-  fixedEditor: true,
-  mouseScroll: true,
-  showExtensionStatus: true,
   showGitStatus: true,
   taskCompletionNotification: true,
   notificationChannels: {
@@ -606,18 +597,9 @@ function hasAgentKitSettings(settings: Record<string, unknown>): boolean {
 
 export function parseAgentKitConfig(settings: Record<string, unknown>): AgentKitConfig {
   const agentKit = getAgentKitSettings(settings);
-  const powerline = settings.powerline;
   const providerCompat = parseProviderCompatSwitchConfig(agentKit);
 
   return {
-    fixedEditor: boolFromObject(agentKit, "fixedEditor")
-      ?? boolFromObject(powerline, "fixedEditor")
-      ?? DEFAULT_CONFIG.fixedEditor,
-    mouseScroll: boolFromObject(agentKit, "mouseScroll")
-      ?? boolFromObject(powerline, "mouseScroll")
-      ?? DEFAULT_CONFIG.mouseScroll,
-    showExtensionStatus: boolFromObject(agentKit, "showExtensionStatus")
-      ?? DEFAULT_CONFIG.showExtensionStatus,
     showGitStatus: boolFromObject(agentKit, "showGitStatus")
       ?? DEFAULT_CONFIG.showGitStatus,
     showProjectDir: boolFromObject(agentKit, "showProjectDir")

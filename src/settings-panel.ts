@@ -50,27 +50,6 @@ export class AgentKitSettingsPanel extends Container {
 
     const items = [
       {
-        id: "fixedEditor",
-        label: "Fixed editor",
-        description: "Keep the Pi input editor fixed at the bottom; chat scrolls above it.",
-        currentValue: options.config.fixedEditor ? "true" : "false",
-        values: ["true", "false"],
-      },
-      {
-        id: "mouseScroll",
-        label: "Mouse scroll",
-        description: "Use mouse wheel / PageUp / PageDown to scroll the chat viewport above the fixed editor.",
-        currentValue: options.config.mouseScroll ? "true" : "false",
-        values: ["true", "false"],
-      },
-      {
-        id: "showExtensionStatus",
-        label: "Extension status",
-        description: "Show Pi extension status rows above the fixed editor, such as MCP and extmgr status.",
-        currentValue: options.config.showExtensionStatus ? "true" : "false",
-        values: ["true", "false"],
-      },
-      {
         id: "editorChrome",
         label: "Editor chrome",
         description: "Show model, thinking level, compat, and context on the input panel meta line.",

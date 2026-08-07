@@ -21,30 +21,6 @@ process.setMaxListeners(20);
 
 initTheme("dark");
 
-class FakeTerminal {
-  columns = 40;
-  private rowCount = 12;
-  writes: string[] = [];
-
-  get rows(): number {
-    return this.rowCount;
-  }
-
-  write(data: string): void {
-    this.writes.push(data);
-  }
-
-  hideCursor(): void {}
-}
-
-function createFooterData(statuses: Map<string, string>) {
-  return {
-    getGitBranch: () => "main",
-    getExtensionStatuses: () => statuses,
-    onBranchChange: () => () => {},
-  };
-}
-
 const editorTheme = { borderColor: (text: string) => text, selectList: {} };
 
 function createTempSettings() {
@@ -56,9 +32,6 @@ function createTempSettings() {
   execFileSync("git", ["init", "-b", "main"], { cwd, stdio: "ignore" });
   writeFileSync(join(cwd, ".pi", "settings.json"), JSON.stringify({
     agentKit: {
-      fixedEditor: true,
-      mouseScroll: true,
-      showExtensionStatus: true,
       taskCompletionNotification: true,
       editorChrome: true,
       fast: {
@@ -114,12 +87,11 @@ function withTempSettings<T>(run: (paths: { root: string; home: string; cwd: str
   }
 }
 
-function createHarness(cwd: string, options: { synchronousEditorComponent?: boolean; synchronousFooter?: boolean; presetEditorFactory?: (tui: any, theme: any, keybindings: any) => any } = {}) {
+function createHarness(cwd: string, options: { synchronousEditorComponent?: boolean; presetEditorFactory?: (tui: any, theme: any, keybindings: any) => any } = {}) {
   const handlers = new Map<string, Array<(event: any, ctx: any) => unknown | Promise<unknown>>>();
   const commands = new Map<string, (args: string, ctx: any) => void | Promise<void>>();
   let sessionStart: ((event: unknown, ctx: any) => void | Promise<void>) | undefined;
   let commandHandler: ((args: string, ctx: any) => void | Promise<void>) | undefined;
-  let footerFactory: ((tui: any, theme: any, footerData: any) => any) | undefined;
   let currentEditorFactory: ((tui: any, theme: any, keybindings: any) => any) | undefined = options.presetEditorFactory;
   let customState: { panel: any; done: () => void } | undefined;
   let mountedEditor: any;
@@ -128,21 +100,17 @@ function createHarness(cwd: string, options: { synchronousEditorComponent?: bool
 
   const notifies: Array<{ message: string; type: string | undefined }> = [];
   const sentMessages: Array<{ message: unknown; options: unknown }> = [];
-  const widgetCalls: Array<{ key: string; content: unknown; options: unknown }> = [];
   const statuses = new Map<string, string>();
   const flags = new Map<string, boolean | string>();
   const providerRegistrations = new Map<string, unknown>();
   const editorFactories: unknown[] = [];
-  const terminal = new FakeTerminal();
-  const statusContainer = { render: () => [] as string[] };
-  const aboveContainer = { render: () => [] as string[] };
+  const footerFactories: Array<((...args: any[]) => any) | undefined> = [];
+  const terminal = { rows: 24, columns: 80 };
   const editorContainer = { children: [] as any[], render: () => ["editor"] };
-  const belowContainer = { render: () => [] as string[] };
   const tui = {
     terminal,
-    children: [{}, {}, statusContainer, aboveContainer, editorContainer, belowContainer, {}] as any[],
+    children: [editorContainer] as any[],
     overlayStack: [] as any[],
-    inputListeners: [] as Array<(data: string) => unknown>,
     requestRenderCalls: [] as Array<boolean | undefined>,
     requestRender(force?: boolean) {
       this.requestRenderCalls.push(force);
@@ -152,13 +120,6 @@ function createHarness(cwd: string, options: { synchronousEditorComponent?: bool
     },
     getShowHardwareCursor() {
       return false;
-    },
-    addInputListener(listener: (data: string) => unknown) {
-      this.inputListeners.push(listener);
-      return () => {
-        const index = this.inputListeners.indexOf(listener);
-        if (index !== -1) this.inputListeners.splice(index, 1);
-      };
     },
   };
 
@@ -170,17 +131,11 @@ function createHarness(cwd: string, options: { synchronousEditorComponent?: bool
       if (text === undefined) statuses.delete(key);
       else statuses.set(key, text);
     },
-    setWidget(key: string, content: unknown, options?: unknown) {
-      widgetCalls.push({ key, content, options });
-    },
     theme: {
       fg: (_kind: string, text: string) => text,
     },
-    setFooter(factory: typeof footerFactory) {
-      footerFactory = factory;
-      if (options.synchronousFooter && factory) {
-        factory(tui, {}, createFooterData(statuses));
-      }
+    setFooter(factory: ((...args: any[]) => any) | undefined) {
+      footerFactories.push(factory);
     },
     getEditorComponent() {
       return currentEditorFactory;
@@ -259,10 +214,6 @@ function createHarness(cwd: string, options: { synchronousEditorComponent?: bool
     if (!editorContainer.children.includes(editor)) {
       editorContainer.children = [editor];
     }
-    if (!options.synchronousFooter) {
-      assert.ok(footerFactory);
-      footerFactory(tui, {}, createFooterData(statuses));
-    }
     await Promise.resolve();
     await Promise.resolve();
   }
@@ -280,14 +231,13 @@ function createHarness(cwd: string, options: { synchronousEditorComponent?: bool
     notifies,
     sentMessages,
     statuses,
-    widgetCalls,
     editorFactories,
     handlers,
     commands,
     flags,
     providerRegistrations,
+    footerFactories,
     tui,
-    terminal,
     editorContainer,
     get mountedEditor() {
       return mountedEditor;
@@ -317,10 +267,6 @@ function createHarness(cwd: string, options: { synchronousEditorComponent?: bool
     startWithMountedEditor,
     openSettings,
   };
-}
-
-function flushTimers(): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, 0));
 }
 
 test("plugin exports a default factory and registers lifecycle hooks plus commands", () => {
@@ -478,89 +424,15 @@ test("continue context filter removes the failed assistant and internal trigger 
   });
 });
 
-test("default startup installs fixed editor with mouse scrolling before settings are changed", async () => {
-  await withTempSettings(async ({ cwd }) => {
-    const harness = createHarness(cwd, { synchronousEditorComponent: true, synchronousFooter: true });
-    assert.ok(harness.sessionStart);
-
-    await harness.sessionStart({ reason: "new" }, harness.ctx);
-    await Promise.resolve();
-    await flushTimers();
-    await Promise.resolve();
-
-    assert.deepEqual(harness.notifies, []);
-    assert.equal(harness.tui.inputListeners.length, 1);
-    assert.ok(harness.terminal.writes.some((write) => write.includes("\x1b[?1002h") && write.includes("\x1b[?1006h")));
-  });
-});
-
-test("startup rebinds an existing custom editor factory before settings are toggled", async () => {
-  await withTempSettings(async ({ cwd }) => {
-    const customEditorFactory = () => ({
-      onSubmit: undefined,
-      setText() {},
-      getText: () => "",
-      render: () => ["custom-editor"],
-    });
-    const harness = createHarness(cwd, {
-      synchronousEditorComponent: true,
-      synchronousFooter: true,
-      presetEditorFactory: customEditorFactory,
-    });
-    assert.ok(harness.sessionStart);
-
-    await harness.sessionStart({ reason: "new" }, harness.ctx);
-    await Promise.resolve();
-    await flushTimers();
-    await Promise.resolve();
-
-    assert.deepEqual(harness.notifies, []);
-    assert.equal(harness.editorFactories.length, 1);
-    assert.notEqual(harness.currentEditorFactory, customEditorFactory);
-    assert.equal(harness.tui.inputListeners.length, 1);
-    assert.ok(harness.terminal.writes.some((write) => write.includes("\x1b[?1002h") && write.includes("\x1b[?1006h")));
-  });
-});
-
-test("startup retries fixed editor install after delayed editor container mount", async () => {
-  await withTempSettings(async ({ cwd }) => {
-    const harness = createHarness(cwd, { synchronousFooter: true });
-    assert.ok(harness.sessionStart);
-
-    await harness.sessionStart({ reason: "new" }, harness.ctx);
-    assert.ok(harness.currentEditorFactory);
-    const editor = harness.currentEditorFactory(harness.tui, editorTheme, {});
-    await Promise.resolve();
-
-    assert.equal(harness.tui.inputListeners.length, 0);
-    harness.editorContainer.children = [editor];
-    await flushTimers();
-    await Promise.resolve();
-
-    assert.deepEqual(harness.notifies, []);
-    assert.equal(harness.tui.inputListeners.length, 1);
-    assert.ok(harness.terminal.writes.some((write) => write.includes("\x1b[?1002h") && write.includes("\x1b[?1006h")));
-  });
-});
-
-test("settings overlay changes defer fixed-editor reinstall without warning fallback", async () => {
+test("startup replaces only Pi's native footer, not the fullscreen layout", async () => {
   await withTempSettings(async ({ cwd }) => {
     const harness = createHarness(cwd);
     await harness.startWithMountedEditor();
 
-    const { promise, state } = await harness.openSettings();
-    state.panel.settingsList.onChange("mouseScroll", "false");
-    await Promise.resolve();
-
-    assert.deepEqual(harness.notifies, []);
-    assert.equal(harness.widgetCalls.some((call) => call.content !== undefined), false);
-
-    state.done();
-    await promise;
-    await Promise.resolve();
-
-    assert.deepEqual(harness.notifies, []);
-    assert.equal(harness.widgetCalls.some((call) => call.content !== undefined), false);
+    assert.equal(harness.footerFactories.length, 1);
+    const footer = harness.footerFactories[0]?.(harness.tui, {}, {});
+    assert.deepEqual(footer?.render(80), []);
+    assert.deepEqual(harness.tui.children, [harness.editorContainer]);
   });
 });
 
@@ -581,27 +453,9 @@ test("settings overlay persists local and Telegram notification toggles", async 
   });
 });
 
-test("settings toggles do not wrap pi-agent-kit editor factory repeatedly", async () => {
-  await withTempSettings(async ({ cwd }) => {
-    const harness = createHarness(cwd);
-    assert.ok(harness.sessionStart);
-    await harness.sessionStart({ reason: "new" }, harness.ctx);
-    const firstFactory = harness.currentEditorFactory;
-
-    const { promise, state } = await harness.openSettings();
-    state.panel.settingsList.onChange("fixedEditor", "false");
-    state.panel.settingsList.onChange("fixedEditor", "true");
-    state.done();
-    await promise;
-
-    assert.equal(harness.currentEditorFactory, firstFactory);
-    assert.ok(harness.editorFactories.every((factory) => factory === firstFactory));
-  });
-});
-
 test("editor chrome renders model, thinking level, context usage, git status, cwd, and body padding", async () => {
   await withTempSettings(async ({ cwd }) => {
-    const harness = createHarness(cwd, { synchronousEditorComponent: true, synchronousFooter: true });
+    const harness = createHarness(cwd, { synchronousEditorComponent: true });
     assert.ok(harness.sessionStart);
 
     await harness.sessionStart({ reason: "new" }, harness.ctx);
@@ -806,7 +660,6 @@ test("editor chrome keeps autocomplete popup rows below the custom border", asyn
     });
     const harness = createHarness(cwd, {
       synchronousEditorComponent: true,
-      synchronousFooter: true,
       presetEditorFactory: baseEditorFactory,
     });
     assert.ok(harness.sessionStart);
@@ -843,7 +696,7 @@ test("fast command toggles status, editor chrome label, and provider payload", a
     delete settingsBefore.agentKit.providerCompat;
     writeFileSync(settingsPath, JSON.stringify(settingsBefore), "utf-8");
 
-    const harness = createHarness(cwd, { synchronousEditorComponent: true, synchronousFooter: true });
+    const harness = createHarness(cwd, { synchronousEditorComponent: true });
     assert.ok(harness.sessionStart);
     await harness.sessionStart({ reason: "new" }, harness.ctx);
 
@@ -869,7 +722,7 @@ test("fast command toggles status, editor chrome label, and provider payload", a
 
 test("provider compat switch auto-registers Claude Code headers and patches Claude payloads", async () => {
   await withTempSettings(async ({ cwd }) => {
-    const harness = createHarness(cwd, { synchronousEditorComponent: true, synchronousFooter: true });
+    const harness = createHarness(cwd, { synchronousEditorComponent: true });
     harness.ctx.model = { contextWindow: 200000, id: "claude-sonnet-4-5", provider: "my-claude", api: "openai-responses" };
     assert.ok(harness.sessionStart);
     await harness.sessionStart({ reason: "new" }, harness.ctx);
@@ -901,7 +754,7 @@ test("provider compat switch auto-registers Claude Code headers and patches Clau
 
 test("provider compat switch auto-registers Codex headers and patches responses payloads", async () => {
   await withTempSettings(async ({ cwd }) => {
-    const harness = createHarness(cwd, { synchronousEditorComponent: true, synchronousFooter: true });
+    const harness = createHarness(cwd, { synchronousEditorComponent: true });
     harness.ctx.model = { contextWindow: 200000, id: "gpt-5.5", provider: "my-codex", api: "openai-codex-responses" };
     assert.ok(harness.sessionStart);
     await harness.sessionStart({ reason: "new" }, harness.ctx);

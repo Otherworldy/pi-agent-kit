@@ -1,4 +1,4 @@
-import type { ExtensionAPI, ExtensionContext, ReadonlyFooterDataProvider, Theme } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 
 import {
   parseAgentKitConfig,
@@ -38,21 +38,10 @@ import {
 } from "./provider-registry.ts";
 import { ensureEditorFactoryInstalled } from "./editor-factory.ts";
 import { installUserMessageChrome } from "./user-message.ts";
-import {
-  teardownFixedEditorCompositor,
-  installFallbackWidgets,
-  clearFallbackWidgets,
-  queueInstallRetry,
-  queueInstallStabilization,
-  clearInstallTimers,
-  installWhenTuiReady,
-  reinstallFixedEditor,
-  setupEditor,
-} from "./compositor-installer.ts";
 
 /**
- * Pi Agent固定编辑器插件
- * 将编辑器固定在终端底部，同时提供快速模式、提供商兼容性等功能
+ * Pi Agent editor chrome 插件
+ * 依托 Pi fullscreen，同时提供通知、快速模式和提供商兼容性等功能
  */
 export default function agentKitPlugin(pi: ExtensionAPI) {
   // 插件配置
@@ -68,50 +57,14 @@ export default function agentKitPlugin(pi: ExtensionAPI) {
     isEnabled: () => config.editorChrome,
   });
 
-  // 创建绑定到当前状态的函数
-  const queueInstallRetryBound = (ctx: any) => queueInstallRetry(ctx, state, reinstallFixedEditorBound);
-  const queueInstallStabilizationBound = (ctx: any) => queueInstallStabilization(ctx, state, reinstallFixedEditorBound);
-  const installWhenTuiReadyBound = (ctx: any, tui: any) => installWhenTuiReady(ctx, tui, state, config, queueInstallRetryBound);
-  const ensureEditorFactoryInstalledBound = (ctx: any) => ensureEditorFactoryInstalled(ctx, state, config, installWhenTuiReadyBound);
-  const reinstallFixedEditorBound = (ctx: any, options?: { force?: boolean }) => reinstallFixedEditor(
-    ctx,
-    state,
-    config,
-    installWhenTuiReadyBound,
-    ensureEditorFactoryInstalledBound,
-    queueInstallRetryBound,
-    options,
-  );
-  const setupEditorBound = (ctx: any) => setupEditor(ctx, state, config, ensureEditorFactoryInstalledBound, reinstallFixedEditorBound);
+  const ensureEditorFactoryInstalledBound = (ctx: any) => ensureEditorFactoryInstalled(ctx, state, config);
 
-  /**
-   * 安装页脚捕获
-   */
-  function installFooterCapture(ctx: any) {
-    ctx.ui.setFooter((tui: any, _theme: Theme, footerData: ReadonlyFooterDataProvider) => {
-      state.tuiRef = tui;
-      state.footerDataRef = footerData;
-      const unsubscribe = footerData.onBranchChange(() => {
-        state.fixedEditorCompositor?.requestRepaint();
-        tui.requestRender();
-      });
-
-      if (config.fixedEditor) {
-        reinstallFixedEditorBound(ctx);
-      }
-
-      return {
-        dispose() {
-          unsubscribe();
-        },
-        invalidate() {
-          state.fixedEditorCompositor?.requestRepaint();
-        },
-        render() {
-          return [];
-        },
-      };
-    });
+  // Keep Pi's fullscreen dock, but omit the native footer because editor chrome
+  // already shows the overlapping model/context/status information.
+  function hideNativeFooter(ctx: any): void {
+    ctx.ui.setFooter?.(() => ({
+      render: () => [],
+    }));
   }
 
   function refreshProviderCompatProviders(ctx: any): void {
@@ -169,22 +122,19 @@ export default function agentKitPlugin(pi: ExtensionAPI) {
     if (config[key] === value) return;
 
     config[key] = value;
-    if (key === "fixedEditor") {
-      setupEditorBound(ctx);
-    } else if (key === "mouseScroll") {
-      reinstallFixedEditorBound(ctx, { force: true });
-    } else if (key === "showExtensionStatus" || key === "editorChrome" || key === "showGitStatus" || key === "showProjectDir") {
-      if (key === "editorChrome") {
-        try {
-          ctx.ui.setWorkingVisible?.(!value);
-        } catch {
-          // ignore
-        }
-        if (!value) stopWorkingSpinner(state);
+    if (key === "editorChrome") {
+      try {
+        ctx.ui.setWorkingVisible?.(!value);
+      } catch {
+        // ignore older Pi versions without the API
       }
-      state.fixedEditorCompositor?.requestRepaint();
-      state.tuiRef?.requestRender?.();
+      if (value) {
+        if (ctx.isIdle?.() === false) startWorkingSpinner(state);
+      } else {
+        stopWorkingSpinner(state);
+      }
     }
+    state.tuiRef?.requestRender?.();
 
     const persisted = writeAgentKitSetting(ctx.cwd, { [key]: value });
     if (!persisted) {
@@ -202,10 +152,6 @@ export default function agentKitPlugin(pi: ExtensionAPI) {
     }
 
     await showAgentKitSettingsPanel(ctx, config, (key, value) => applySetting(ctx, key, value));
-
-    if (state.needsFixedEditorReinstall) {
-      reinstallFixedEditorBound(ctx);
-    }
   }
 
   /**
@@ -357,7 +303,6 @@ export default function agentKitPlugin(pi: ExtensionAPI) {
   pi.on("session_start", async (_event, ctx: ExtensionContext) => {
     config = parseAgentKitConfig(readSettings(ctx.cwd));
     resetPluginState(state);
-    clearInstallTimers(state);
     state.activeCtxRef = ctx;
     state.activeThinkingLevel = typeof pi.getThinkingLevel === "function" ? pi.getThinkingLevel() : "off";
     state.currentModelRef = ctx.model;
@@ -368,27 +313,18 @@ export default function agentKitPlugin(pi: ExtensionAPI) {
 
     if (!ctx.hasUI) return;
 
-    // Move working indicator into editor-chrome bottom-left; hide built-in row.
-    if (config.editorChrome) {
-      try {
-        ctx.ui.setWorkingVisible?.(false);
-      } catch {
-        // older pi without the API
-      }
+    try {
+      ctx.ui.setWorkingVisible?.(!config.editorChrome);
+    } catch {
+      // ignore older Pi versions without the API
     }
-
-    installFooterCapture(ctx);
-    setupEditorBound(ctx);
-    reinstallFixedEditorBound(ctx);
-    queueInstallStabilizationBound(ctx);
+    hideNativeFooter(ctx);
+    ensureEditorFactoryInstalledBound(ctx);
   });
 
   pi.on("thinking_level_select", async (event, ctx) => {
     state.activeThinkingLevel = event.level;
-    if (ctx.hasUI) {
-      state.fixedEditorCompositor?.requestRepaint();
-      state.tuiRef?.requestRender?.();
-    }
+    if (ctx.hasUI) state.tuiRef?.requestRender?.();
   });
 
   pi.on("model_select", async (event, ctx) => {
@@ -396,10 +332,7 @@ export default function agentKitPlugin(pi: ExtensionAPI) {
     state.currentModelRef = event.model ?? ctx.model;
     refreshProviderCompatProviders(ctx);
     updateProviderStatuses(ctx, state.currentModelRef, state.fastDesired, config);
-    if (ctx.hasUI) {
-      state.fixedEditorCompositor?.requestRepaint();
-      state.tuiRef?.requestRender?.();
-    }
+    if (ctx.hasUI) state.tuiRef?.requestRender?.();
   });
 
   pi.on("agent_start", async (_event, ctx) => {
@@ -413,15 +346,11 @@ export default function agentKitPlugin(pi: ExtensionAPI) {
       // ignore
     }
     startWorkingSpinner(state);
-    state.fixedEditorCompositor?.requestRepaint();
-    state.tuiRef?.requestRender?.();
   });
 
   pi.on("agent_end", async (event, ctx) => {
     if (state.isWorking) {
       stopWorkingSpinner(state);
-      state.fixedEditorCompositor?.requestRepaint();
-      state.tuiRef?.requestRender?.();
     }
 
     const failedAssistant = findLastContinuableAssistantError(event.messages);
@@ -440,8 +369,7 @@ export default function agentKitPlugin(pi: ExtensionAPI) {
   });
 
   pi.on("session_shutdown", async (_event, ctx) => {
-    clearInstallTimers(state);
-    teardownFixedEditorCompositor(state, { resetExtendedKeyboardModes: true });
+    ctx?.ui?.setFooter?.(undefined);
     ctx?.ui?.setStatus?.("agent-kit-fast", undefined);
     ctx?.ui?.setStatus?.("agent-kit-claude-code", undefined);
     ctx?.ui?.setStatus?.("agent-kit-codex", undefined);
