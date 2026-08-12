@@ -38,6 +38,7 @@ import {
 } from "./provider-registry.ts";
 import { ensureEditorFactoryInstalled } from "./editor-factory.ts";
 import { installUserMessageChrome } from "./user-message.ts";
+import { estimateDeltaTokens } from "./tps.ts";
 
 /**
  * Pi Agent editor chrome 插件
@@ -294,6 +295,15 @@ export default function agentKitPlugin(pi: ExtensionAPI) {
     return codexPayload ?? claudeCodePayload ?? fastPayload;
   });
 
+  pi.on("message_update", (event: any) => {
+    // 流式 delta 累计估算 token，喂给 TPS 计量器
+    const delta = event?.assistantMessageEvent?.delta;
+    if (typeof delta === "string" && delta.length > 0) {
+      state.tpsMeter.record(estimateDeltaTokens(delta));
+      state.tuiRef?.requestRender?.();
+    }
+  });
+
   pi.on("turn_start", async (_event, ctx) => {
     state.activeCtxRef = ctx;
     state.currentModelRef = activeModel(ctx, state.currentModelRef);
@@ -352,6 +362,8 @@ export default function agentKitPlugin(pi: ExtensionAPI) {
     if (state.isWorking) {
       stopWorkingSpinner(state);
     }
+    // 保留最后速率，空闲时冻结显示（不归零）
+    state.tpsMeter.clear();
 
     const failedAssistant = findLastContinuableAssistantError(event.messages);
     const failureSnapshot = createContinueFailureSnapshot(failedAssistant);

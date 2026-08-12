@@ -1,5 +1,6 @@
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { ContinueFailureSnapshot } from "./continue-mode.ts";
+import { TpsMeter } from "./tps.ts";
 
 /**
  * 插件状态管理
@@ -39,6 +40,9 @@ export interface PluginState {
   // /continue失败恢复状态
   lastContinueFailure: ContinueFailureSnapshot | null;
   pendingContinueRequest: ContinuePendingRequest | null;
+
+  // 流式 TPS 计量
+  tpsMeter: TpsMeter;
 }
 
 export type EditorFactory = (tui: any, theme: any, keybindings: any) => any;
@@ -90,6 +94,7 @@ export function createPluginState(): PluginState {
     workingSpinnerTimer: null,
     lastContinueFailure: null,
     pendingContinueRequest: null,
+    tpsMeter: new TpsMeter(),
   };
 }
 
@@ -200,6 +205,7 @@ export function resetPluginState(state: PluginState): void {
   state.tuiRef = null;
   state.lastContinueFailure = null;
   state.pendingContinueRequest = null;
+  state.tpsMeter.reset();
 }
 
 /**
@@ -216,4 +222,5 @@ export function cleanupPluginState(state: PluginState): void {
   state.currentModelRef = null;
   state.lastContinueFailure = null;
   state.pendingContinueRequest = null;
+  state.tpsMeter.reset();
 }

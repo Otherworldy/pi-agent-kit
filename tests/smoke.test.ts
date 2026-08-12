@@ -294,6 +294,7 @@ test("plugin exports a default factory and registers lifecycle hooks plus comman
   assert.deepEqual(events, [
     "context",
     "before_provider_request",
+    "message_update",
     "turn_start",
     "session_start",
     "thinking_level_select",
@@ -720,6 +721,33 @@ test("fast command toggles status, editor chrome label, and provider payload", a
   });
 });
 
+test("message_update stream deltas drive the tps chrome slot", async () => {
+  await withTempSettings(async ({ cwd }) => {
+    const harness = createHarness(cwd, { synchronousEditorComponent: true });
+    assert.ok(harness.sessionStart);
+    await harness.sessionStart({ reason: "new" }, harness.ctx);
+
+    // No stream yet → slot stays visible at 0
+    assert.ok(harness.mountedEditor.render(120).some((line: string) => line.includes("0 t/s")));
+
+    // Simulate a stream of deltas (~400 chars each ≈ 100 tokens)
+    for (let i = 0; i < 10; i += 1) {
+      await harness.emit("message_update", {
+        assistantMessageEvent: { type: "text_delta", delta: "x".repeat(400) },
+      });
+    }
+    const rendered = harness.mountedEditor.render(120).join("\n");
+    assert.match(rendered, /\d+ t\/s/);
+    assert.equal(/(^|[^0-9])0 t\/s/.test(rendered), false);
+
+    // agent_end keeps the last rate frozen (no reset to 0)
+    await harness.emit("agent_end", { messages: [] });
+    const frozen = harness.mountedEditor.render(120).join("\n");
+    assert.equal(/(^|[^0-9])0 t\/s/.test(frozen), false);
+    assert.match(frozen, /\d+ t\/s/);
+  });
+});
+
 test("provider compat switch auto-registers Claude Code headers and patches Claude payloads", async () => {
   await withTempSettings(async ({ cwd }) => {
     const harness = createHarness(cwd, { synchronousEditorComponent: true });
@@ -862,6 +890,39 @@ test("editor chrome timer slot can be placed, reordered, or hidden", () => {
     display: { left: ["model"], right: [] },
   });
   assert.equal(hidden.some((line) => line.includes("12s")), false);
+});
+
+test("editor chrome tps slot can be placed, reordered, or hidden", () => {
+  const theme = { fg: (_kind: string, text: string) => text };
+  const base = {
+    width: 100,
+    enabled: true as const,
+    thinkingLevel: "off",
+    tpsLabel: "45.7 t/s",
+    renderBase: (width: number) => ["─".repeat(width), "body".padEnd(width), "─".repeat(width)],
+    context: {
+      cwd: process.cwd(),
+      model: { id: "m" },
+      ui: { theme },
+    },
+  };
+
+  const withTps = renderEditorChrome({
+    ...base,
+    display: { left: ["tps", "model"], right: [] },
+  });
+  const withPlain = (withTps.find((line) => line.includes("45.7 t/s")) ?? "")
+    .replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, "")
+    .replace(/^▌\s*/, "")
+    .trimEnd();
+  assert.ok(withPlain.startsWith("45.7 t/s"));
+  assert.ok(withPlain.includes("m"));
+
+  const hidden = renderEditorChrome({
+    ...base,
+    display: { left: ["model"], right: [] },
+  });
+  assert.equal(hidden.some((line) => line.includes("45.7 t/s")), false);
 });
 
 test("editor chrome shows project dir left of git status, hides via showProjectDir", () => {

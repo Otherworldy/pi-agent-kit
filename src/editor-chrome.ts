@@ -40,6 +40,8 @@ export interface EditorChromeRenderInput {
   fastLabel?: string;
   /** Last/live working elapsed text for the `timer` chrome slot, e.g. `12s`. */
   workingElapsedLabel?: string;
+  /** Live streaming rate for the `tps` chrome slot, e.g. `45.7 t/s`. Empty when idle. */
+  tpsLabel?: string;
   showGitStatus?: boolean;
   showProjectDir?: boolean;
   /** Meta layout: left/right slot lists (order = display order). */
@@ -381,6 +383,7 @@ function renderChromeSlot(
   providerCompatLabel?: string,
   fastLabel?: string,
   workingElapsedLabel?: string,
+  tpsLabel?: string,
 ): string {
   switch (slot) {
     case "model":
@@ -391,6 +394,8 @@ function renderChromeSlot(
     }
     case "timer":
       return workingElapsedLabel ? fg(theme, META_LIGHT, workingElapsedLabel) : "";
+    case "tps":
+      return tpsLabel ? fg(theme, META_LIGHT, tpsLabel) : "";
     case "providerCompat":
       return providerCompatLabel ? fg(theme, META_LIGHT, providerCompatLabel) : "";
     case "fast":
@@ -412,6 +417,7 @@ function buildMetaLine(
   providerCompatLabel?: string,
   fastLabel?: string,
   workingElapsedLabel?: string,
+  tpsLabel?: string,
 ): string {
   const theme = context.ui?.theme;
   const separator = fg(theme, "dim", " · ");
@@ -424,6 +430,7 @@ function buildMetaLine(
     providerCompatLabel,
     fastLabel,
     workingElapsedLabel,
+    tpsLabel,
   );
 
   const leftParts = display.left.map(render).filter(Boolean);
@@ -528,6 +535,7 @@ export function renderEditorChrome(input: EditorChromeRenderInput): string[] {
     input.providerCompatLabel,
     input.fastLabel,
     input.workingElapsedLabel,
+    input.tpsLabel,
   );
   const externalStatus = buildExternalStatusLine(input.context, width, {
     showGitStatus: input.showGitStatus,

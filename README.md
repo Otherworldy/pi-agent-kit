@@ -53,7 +53,7 @@ Extension config is **flat** (not nested under `agentKit`):
   },
   "editorChrome": true,
   "chrome": {
-    "left": ["model", "thinking", "timer", "providerCompat", "fast"],
+    "left": ["model", "thinking", "timer", "tps", "providerCompat", "fast"],
     "right": ["cost", "context"]
   },
   "providerCompat": {
@@ -76,7 +76,7 @@ Extension config is **flat** (not nested under `agentKit`):
 
 ## Editor chrome
 
-Pi v0.84 fullscreen provides the fixed bottom editor and chat scrolling. The plugin hides Pi's native footer to avoid repeating model, context, project, and extension-status lines already represented by the chrome. `editorChrome` restyles the native input as a solid gray panel with a left `▌` rail colored by thinking level, or green in bash (`!`) mode, equal side insets, and a bottom meta line. Layout is controlled by `agentKit.chrome.left` / `agentKit.chrome.right` slot arrays (order = display order; omit a slot to hide it). Available slots: `model`, `thinking`, `timer` (last agent working duration, live while working), `providerCompat`, `fast`, `context` (`34k/500k`), `cost`. Default: left `model · thinking · timer · providerCompat · fast`, right `cost · context`. The plugin also keeps the working indicator, project directory, optional git branch/changes, and matching sent-user-message styling; Pi's native fullscreen dock handles compaction status.
+Pi v0.84 fullscreen provides the fixed bottom editor and chat scrolling. The plugin hides Pi's native footer to avoid repeating model, context, project, and extension-status lines already represented by the chrome. `editorChrome` restyles the native input as a solid gray panel with a left `▌` rail colored by thinking level, or green in bash (`!`) mode, equal side insets, and a bottom meta line. Layout is controlled by `agentKit.chrome.left` / `agentKit.chrome.right` slot arrays (order = display order; omit a slot to hide it). Available slots: `model`, `thinking`, `timer` (last agent working duration, live while working), `tps` (streaming rate, e.g. `45.7 t/s`; freezes on the last rate when idle, `0 t/s` before the first stream), `providerCompat`, `fast`, `context` (`34k/500k`), `cost`. Default: left `model · thinking · timer · tps · providerCompat · fast`, right `cost · context`. The plugin also keeps the working indicator, project directory, optional git branch/changes, and matching sent-user-message styling; Pi's native fullscreen dock handles compaction status.
 
 ## Task completion notification
 
