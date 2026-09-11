@@ -38,10 +38,12 @@ export interface EditorChromeRenderInput {
   thinkingLevel: string;
   providerCompatLabel?: string;
   fastLabel?: string;
-  /** Last/live working elapsed text for the `timer` chrome slot, e.g. `12s`. */
+  /** Session-total AI working elapsed text for the `timer` chrome slot, e.g. `12s`. */
   workingElapsedLabel?: string;
   /** Live streaming rate for the `tps` chrome slot, e.g. `45.7 t/s`. Empty when idle. */
   tpsLabel?: string;
+  /** Session-average first-token latency for the `ttft` chrome slot, e.g. `1.2s ttft`. */
+  ttftLabel?: string;
   showGitStatus?: boolean;
   showProjectDir?: boolean;
   /** Meta layout: left/right slot lists (order = display order). */
@@ -384,6 +386,7 @@ function renderChromeSlot(
   fastLabel?: string,
   workingElapsedLabel?: string,
   tpsLabel?: string,
+  ttftLabel?: string,
 ): string {
   switch (slot) {
     case "model":
@@ -396,6 +399,8 @@ function renderChromeSlot(
       return workingElapsedLabel ? fg(theme, META_LIGHT, workingElapsedLabel) : "";
     case "tps":
       return tpsLabel ? fg(theme, META_LIGHT, tpsLabel) : "";
+    case "ttft":
+      return ttftLabel ? fg(theme, META_LIGHT, ttftLabel) : "";
     case "providerCompat":
       return providerCompatLabel ? fg(theme, META_LIGHT, providerCompatLabel) : "";
     case "fast":
@@ -418,6 +423,7 @@ function buildMetaLine(
   fastLabel?: string,
   workingElapsedLabel?: string,
   tpsLabel?: string,
+  ttftLabel?: string,
 ): string {
   const theme = context.ui?.theme;
   const separator = fg(theme, "dim", " · ");
@@ -431,6 +437,7 @@ function buildMetaLine(
     fastLabel,
     workingElapsedLabel,
     tpsLabel,
+    ttftLabel,
   );
 
   const leftParts = display.left.map(render).filter(Boolean);
@@ -536,6 +543,7 @@ export function renderEditorChrome(input: EditorChromeRenderInput): string[] {
     input.fastLabel,
     input.workingElapsedLabel,
     input.tpsLabel,
+    input.ttftLabel,
   );
   const externalStatus = buildExternalStatusLine(input.context, width, {
     showGitStatus: input.showGitStatus,

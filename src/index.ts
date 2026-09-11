@@ -272,6 +272,7 @@ export default function agentKitPlugin(pi: ExtensionAPI) {
   });
 
   pi.on("before_provider_request", (event, ctx) => {
+    state.ttftMeter.markRequest();
     state.currentModelRef = activeModel(ctx, state.currentModelRef);
     const fastPayload = patchFastPayload(event.payload, {
       enabled: state.fastDesired,
@@ -300,6 +301,7 @@ export default function agentKitPlugin(pi: ExtensionAPI) {
     const delta = event?.assistantMessageEvent?.delta;
     if (typeof delta === "string" && delta.length > 0) {
       state.tpsMeter.record(estimateDeltaTokens(delta));
+      state.ttftMeter.markFirstToken();
       state.tuiRef?.requestRender?.();
     }
   });
@@ -364,6 +366,7 @@ export default function agentKitPlugin(pi: ExtensionAPI) {
     }
     // 保留最后速率，空闲时冻结显示（不归零）
     state.tpsMeter.clear();
+    state.ttftMeter.clearPending();
 
     const failedAssistant = findLastContinuableAssistantError(event.messages);
     const failureSnapshot = createContinueFailureSnapshot(failedAssistant);

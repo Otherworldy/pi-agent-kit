@@ -53,6 +53,7 @@ export type EditorChromeSlot =
   | "thinking"
   | "timer"
   | "tps"
+  | "ttft"
   | "providerCompat"
   | "fast"
   | "context"
@@ -63,6 +64,7 @@ export const EDITOR_CHROME_SLOTS: readonly EditorChromeSlot[] = [
   "thinking",
   "timer",
   "tps",
+  "ttft",
   "providerCompat",
   "fast",
   "context",
@@ -248,7 +250,7 @@ const DEFAULT_CONFIG: AgentKitConfig = {
   },
   editorChrome: true,
   chrome: {
-    left: ["model", "thinking", "timer", "tps", "providerCompat", "fast"],
+    left: ["model", "thinking", "timer", "tps", "ttft", "providerCompat", "fast"],
     right: ["cost", "context"],
   },
   showProjectDir: true,

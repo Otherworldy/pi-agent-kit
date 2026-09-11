@@ -5,6 +5,7 @@ import { AGENT_KIT_EDITOR_FACTORY, formatWorkingElapsedMs, getWorkingElapsedMs, 
 import { renderEditorChrome } from "./editor-chrome.ts";
 import { getFastChromeLabel, getProviderCompatChromeLabel } from "./status-updater.ts";
 import { formatTpsLabel } from "./tps.ts";
+import { formatTtftLabel } from "./ttft.ts";
 
 /**
  * 包装编辑器工厂，添加 editor chrome 装饰
@@ -45,6 +46,7 @@ export function wrapEditorFactory(
           fastLabel: getFastChromeLabel(state.activeCtxRef, state.currentModelRef, state.fastDesired, config.fast.supportedModels),
           workingElapsedLabel: formatWorkingElapsedMs(getWorkingElapsedMs(state)),
           tpsLabel: formatTpsLabel(state.tpsMeter.getTps()),
+          ttftLabel: formatTtftLabel(state.ttftMeter.getAverageMs()),
           showGitStatus: config.showGitStatus,
           showProjectDir: config.showProjectDir,
           display: config.chrome,

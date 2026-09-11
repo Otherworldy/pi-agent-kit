@@ -1,6 +1,7 @@
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { ContinueFailureSnapshot } from "./continue-mode.ts";
 import { TpsMeter } from "./tps.ts";
+import { TtftMeter } from "./ttft.ts";
 
 /**
  * 插件状态管理
@@ -30,9 +31,9 @@ export interface PluginState {
 
   // 输入区外左下角 status 指示（working / compacting）
   isWorking: boolean;
-  /** agent_start 时刻；仅 working 期间推进，idle 为 null */
+  /** 当前 working 段起点；仅 working 期间推进，idle 为 null */
   workingStartedAt: number | null;
-  /** 上一次 working 冻结时长；idle 时持续展示 */
+  /** 本 session 已结束的 AI working 累计；idle 时冻结展示 */
   lastWorkingElapsedMs: number;
   workingSpinnerIndex: number;
   workingSpinnerTimer: ReturnType<typeof setInterval> | null;
@@ -41,8 +42,9 @@ export interface PluginState {
   lastContinueFailure: ContinueFailureSnapshot | null;
   pendingContinueRequest: ContinuePendingRequest | null;
 
-  // 流式 TPS 计量
+  // 流式 TPS / 首 token 计量
   tpsMeter: TpsMeter;
+  ttftMeter: TtftMeter;
 }
 
 export type EditorFactory = (tui: any, theme: any, keybindings: any) => any;
@@ -95,6 +97,7 @@ export function createPluginState(): PluginState {
     lastContinueFailure: null,
     pendingContinueRequest: null,
     tpsMeter: new TpsMeter(),
+    ttftMeter: new TtftMeter(),
   };
 }
 
@@ -145,30 +148,30 @@ function maybeStopStatusSpinner(state: PluginState): void {
 
 export function startWorkingSpinner(state: PluginState): void {
   state.isWorking = true;
-  state.workingStartedAt = Date.now();
+  if (state.workingStartedAt == null) state.workingStartedAt = Date.now();
   ensureStatusSpinner(state);
 }
 
 export function stopWorkingSpinner(state: PluginState): void {
   if (state.workingStartedAt != null) {
-    state.lastWorkingElapsedMs = Math.max(
-      0,
-      Date.now() - state.workingStartedAt,
-    );
+    const elapsed = Math.max(0, Date.now() - state.workingStartedAt);
+    state.lastWorkingElapsedMs += elapsed;
     state.workingStartedAt = null;
   }
   state.isWorking = false;
   maybeStopStatusSpinner(state);
 }
 
-/** Live while working, else last frozen working duration. */
+/** Session-total AI working time: frozen runs plus the live segment. */
 export function getWorkingElapsedMs(
   state: PluginState,
   now = Date.now(),
 ): number {
-  if (state.workingStartedAt != null)
-    return Math.max(0, now - state.workingStartedAt);
-  return state.lastWorkingElapsedMs;
+  const live =
+    state.workingStartedAt != null
+      ? Math.max(0, now - state.workingStartedAt)
+      : 0;
+  return state.lastWorkingElapsedMs + live;
 }
 
 /** Whole seconds: `12s` / `1m 05s`. */
@@ -202,10 +205,12 @@ export function workingSpinnerFrame(
 export function resetPluginState(state: PluginState): void {
   clearTaskCompletionErrorNotificationTimer(state);
   stopWorkingSpinner(state);
+  state.lastWorkingElapsedMs = 0;
   state.tuiRef = null;
   state.lastContinueFailure = null;
   state.pendingContinueRequest = null;
   state.tpsMeter.reset();
+  state.ttftMeter.reset();
 }
 
 /**
@@ -214,6 +219,7 @@ export function resetPluginState(state: PluginState): void {
 export function cleanupPluginState(state: PluginState): void {
   clearTaskCompletionErrorNotificationTimer(state);
   stopWorkingSpinner(state);
+  state.lastWorkingElapsedMs = 0;
   state.registeredClaudeCodeCompatProviders = new Set();
   state.registeredCodexCompatProviders = new Set();
   state.previousCompatProviderConfigs.clear();
@@ -223,4 +229,5 @@ export function cleanupPluginState(state: PluginState): void {
   state.lastContinueFailure = null;
   state.pendingContinueRequest = null;
   state.tpsMeter.reset();
+  state.ttftMeter.reset();
 }

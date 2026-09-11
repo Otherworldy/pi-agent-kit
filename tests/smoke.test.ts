@@ -12,6 +12,7 @@ import {
   createPluginState,
   formatWorkingElapsedMs,
   getWorkingElapsedMs,
+  resetPluginState,
   startWorkingSpinner,
   stopWorkingSpinner,
 } from "../src/plugin-state.ts";
@@ -721,6 +722,28 @@ test("fast command toggles status, editor chrome label, and provider payload", a
   });
 });
 
+test("provider request first-token latency drives the ttft chrome slot", async () => {
+  await withTempSettings(async ({ cwd }) => {
+    const harness = createHarness(cwd, { synchronousEditorComponent: true });
+    assert.ok(harness.sessionStart);
+    await harness.sessionStart({ reason: "new" }, harness.ctx);
+
+    assert.ok(harness.mountedEditor.render(120).some((line: string) => line.includes("0ms ttft")));
+
+    await harness.emit("before_provider_request", { payload: { model: "gpt-5.5" } });
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    await harness.emit("message_update", {
+      assistantMessageEvent: { type: "text_delta", delta: "hi" },
+    });
+    const rendered = harness.mountedEditor.render(120).join("\n");
+    assert.match(rendered, /(?:^|[^0-9])(?:[1-9]\d*ms ttft|[1-9]\d*(?:\.\d+)?s ttft)/);
+
+    await harness.emit("agent_end", { messages: [] });
+    const frozen = harness.mountedEditor.render(120).join("\n");
+    assert.match(frozen, /(?:^|[^0-9])(?:[1-9]\d*ms ttft|[1-9]\d*(?:\.\d+)?s ttft)/);
+  });
+});
+
 test("message_update stream deltas drive the tps chrome slot", async () => {
   await withTempSettings(async ({ cwd }) => {
     const harness = createHarness(cwd, { synchronousEditorComponent: true });
@@ -859,6 +882,32 @@ test("working elapsed formats seconds, freezes on stop, stays visible", () => {
   }
 });
 
+test("working elapsed accumulates across runs and resets with the session", () => {
+  const state = createPluginState();
+  startWorkingSpinner(state);
+  state.workingStartedAt = Date.now() - 5_000;
+  stopWorkingSpinner(state);
+  assert.ok(state.lastWorkingElapsedMs >= 5_000 && state.lastWorkingElapsedMs < 5_100);
+
+  startWorkingSpinner(state);
+  state.workingStartedAt = Date.now() - 3_000;
+  const live = getWorkingElapsedMs(state);
+  assert.ok(live >= 8_000 && live < 8_200);
+  stopWorkingSpinner(state);
+  assert.ok(state.lastWorkingElapsedMs >= 8_000 && state.lastWorkingElapsedMs < 8_200);
+  assert.equal(getWorkingElapsedMs(state), state.lastWorkingElapsedMs);
+
+  startWorkingSpinner(state);
+  const startedAt = state.workingStartedAt;
+  startWorkingSpinner(state);
+  assert.equal(state.workingStartedAt, startedAt);
+  stopWorkingSpinner(state);
+
+  resetPluginState(state);
+  assert.equal(state.lastWorkingElapsedMs, 0);
+  assert.equal(getWorkingElapsedMs(state), 0);
+});
+
 test("editor chrome timer slot can be placed, reordered, or hidden", () => {
   const theme = { fg: (_kind: string, text: string) => text };
   const base = {
@@ -890,6 +939,39 @@ test("editor chrome timer slot can be placed, reordered, or hidden", () => {
     display: { left: ["model"], right: [] },
   });
   assert.equal(hidden.some((line) => line.includes("12s")), false);
+});
+
+test("editor chrome ttft slot can be placed, reordered, or hidden", () => {
+  const theme = { fg: (_kind: string, text: string) => text };
+  const base = {
+    width: 100,
+    enabled: true as const,
+    thinkingLevel: "off",
+    ttftLabel: "1.2s ttft",
+    renderBase: (width: number) => ["─".repeat(width), "body".padEnd(width), "─".repeat(width)],
+    context: {
+      cwd: process.cwd(),
+      model: { id: "m" },
+      ui: { theme },
+    },
+  };
+
+  const withTtft = renderEditorChrome({
+    ...base,
+    display: { left: ["ttft", "model"], right: [] },
+  });
+  const withPlain = (withTtft.find((line) => line.includes("1.2s ttft")) ?? "")
+    .replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, "")
+    .replace(/^▌\s*/, "")
+    .trimEnd();
+  assert.ok(withPlain.startsWith("1.2s ttft"));
+  assert.ok(withPlain.includes("m"));
+
+  const hidden = renderEditorChrome({
+    ...base,
+    display: { left: ["model"], right: [] },
+  });
+  assert.equal(hidden.some((line) => line.includes("1.2s ttft")), false);
 });
 
 test("editor chrome tps slot can be placed, reordered, or hidden", () => {
