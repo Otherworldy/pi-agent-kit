@@ -2,7 +2,8 @@ import { execFileSync } from "node:child_process";
 import { basename } from "node:path";
 import type { ThemeColor } from "@earendil-works/pi-coding-agent";
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
-import type { EditorChromeDisplayConfig, EditorChromeSlot } from "./config.ts";
+import type { EditorChromeDisplayConfig, EditorChromeSlot, StatusBarDisplayConfig } from "./config.ts";
+import { EMPTY_STATUS_BAR, resolveStatusBarLayout, type ExtensionStatusItem } from "./extension-status.ts";
 
 const GIT_CACHE_MS = 2000;
 const MIN_CHROME_WIDTH = 16;
@@ -44,14 +45,15 @@ export interface EditorChromeRenderInput {
   tpsLabel?: string;
   /** Session-average first-token latency for the `ttft` chrome slot, e.g. `1.2s ttft`. */
   ttftLabel?: string;
-  showGitStatus?: boolean;
-  showProjectDir?: boolean;
   /** Meta layout: left/right slot lists (order = display order). */
   display?: EditorChromeDisplayConfig;
   /** Left-outside working label, e.g. "⠋ working". Empty when idle. */
   workingLabel?: string;
   /** Pi editor border: thinking level, or green in bash (!) mode. */
   borderColor?: (text: string) => string;
+  /** Other plugins' setStatus texts, rendered above the input panel. */
+  extensionStatuses?: ExtensionStatusItem[];
+  statusBar?: StatusBarDisplayConfig;
   renderBase: (width: number) => string[];
 }
 
@@ -468,36 +470,47 @@ function formatProjectDirLabel(theme: ThemeLike | undefined, cwd: string, maxWid
   return truncateToWidth(label, Math.max(0, maxWidth), "…");
 }
 
-/** Status row outside the input panel: working (left) · projectDir + git (right). */
-function buildExternalStatusLine(
-  context: EditorChromeContextLike,
+function statusItemText(keys: string[], byKey: Map<string, string>, separator: string): string {
+  return keys.map((key) => byKey.get(key) ?? "").filter(Boolean).join(separator);
+}
+
+function buildStatusByKey(
+  context: EditorChromeContextLike | null | undefined,
+  statuses: ExtensionStatusItem[] | undefined,
   width: number,
-  options: { showGitStatus?: boolean; showProjectDir?: boolean; workingLabel?: string },
-): string {
-  const theme = context.ui?.theme;
-  const working = options.workingLabel?.trim() ? options.workingLabel.trim() : "";
-  const git = options.showGitStatus
-    ? formatGitLabel(theme, getGitInfo(context.cwd ?? process.cwd()), width)
-    : "";
-  const separator = fg(theme, "dim", " · ");
-  const projectDir = options.showProjectDir
-    ? formatProjectDirLabel(
-      theme,
-      context.cwd ?? process.cwd(),
-      git ? Math.max(0, width - visibleWidth(git) - visibleWidth(separator)) : width,
-    )
-    : "";
-  const right = [projectDir, git].filter(Boolean).join(separator);
-
-  if (!working && !right) return "";
-  if (!right) return padLine(working, width);
-  if (!working) {
-    const pad = Math.max(0, width - visibleWidth(right));
-    return " ".repeat(pad) + right;
+): Map<string, string> {
+  const byKey = new Map<string, string>();
+  for (const item of statuses ?? []) {
+    if (item.text) byKey.set(item.key, item.text);
   }
+  if (!context) return byKey;
+  const theme = context.ui?.theme;
+  const cwd = context.cwd ?? process.cwd();
+  byKey.set("projectDir", formatProjectDirLabel(theme, cwd, width));
+  byKey.set("git", formatGitLabel(theme, getGitInfo(cwd), width));
+  return byKey;
+}
 
-  const gap = Math.max(1, width - visibleWidth(working) - visibleWidth(right));
-  return padLine(`${working}${" ".repeat(gap)}${right}`, width);
+function cornerStatusLine(
+  leftKeys: string[],
+  rightKeys: string[],
+  byKey: Map<string, string>,
+  width: number,
+  separator: string,
+  leftPrefix = "",
+): string {
+  const left = [leftPrefix, statusItemText(leftKeys, byKey, separator)].filter(Boolean).join(" ");
+  const right = statusItemText(rightKeys, byKey, separator);
+  if (!left && !right) return "";
+  return packLeftRight(left, right, width);
+}
+
+function wrapStatusLines(
+  base: string[],
+  top: string,
+  bottom: string,
+): string[] {
+  return [...(top ? [top] : []), ...base, ...(bottom ? [bottom] : [])];
 }
 
 function paintPanelLine(
@@ -516,16 +529,35 @@ function paintPanelLine(
   return withPanelBg(theme, bar + pad + padLine(content, contentWidth) + pad);
 }
 
+function statusBarLines(
+  input: EditorChromeRenderInput,
+  width: number,
+): { top: string; bottom: string } {
+  const config = input.statusBar ?? EMPTY_STATUS_BAR;
+  const pluginKeys = (input.extensionStatuses ?? []).map((item) => item.key);
+  const layout = resolveStatusBarLayout(config, [...pluginKeys, "projectDir", "git"]);
+  const byKey = buildStatusByKey(input.context, input.extensionStatuses, width);
+  const separator = fg(input.context?.ui?.theme, "dim", " · ");
+  const working = input.enabled && input.workingLabel?.trim() ? input.workingLabel.trim() : "";
+  return {
+    top: cornerStatusLine(layout.topLeft, layout.topRight, byKey, width, separator),
+    bottom: cornerStatusLine(layout.bottomLeft, layout.bottomRight, byKey, width, separator, working),
+  };
+}
+
 export function renderEditorChrome(input: EditorChromeRenderInput): string[] {
   const width = Math.max(1, Math.floor(input.width));
-  if (!input.enabled || !input.context || width < MIN_CHROME_WIDTH) return input.renderBase(input.width);
+  const { top, bottom } = statusBarLines(input, width);
+  if (!input.enabled || !input.context || width < MIN_CHROME_WIDTH) {
+    return wrapStatusLines(input.renderBase(input.width), top, bottom);
+  }
 
   const barWidth = visibleWidth(LEFT_BAR);
   const contentWidth = Math.max(1, width - barWidth - PAD_X * 2);
   // Base editor still draws ─ rules; strip them (no chrome ─ borders).
   const baseLines = input.renderBase(contentWidth);
   const split = splitEditorRender(baseLines);
-  if (!split) return input.renderBase(input.width);
+  if (!split) return wrapStatusLines(input.renderBase(input.width), top, bottom);
 
   const theme = input.context.ui?.theme;
   const thinkingLevel = input.thinkingLevel || "off";
@@ -545,19 +577,15 @@ export function renderEditorChrome(input: EditorChromeRenderInput): string[] {
     input.tpsLabel,
     input.ttftLabel,
   );
-  const externalStatus = buildExternalStatusLine(input.context, width, {
-    showGitStatus: input.showGitStatus,
-    showProjectDir: input.showProjectDir,
-    workingLabel: input.workingLabel,
-  });
 
   return [
+    ...(top ? [top] : []),
     ...topPad,
     ...split.bodyLines.map((line) => paint(line)),
     ...metaGap,
     paint(meta),
     ...bottomPad,
-    ...(externalStatus ? [externalStatus] : []),
+    ...(bottom ? [bottom] : []),
     ...split.popupLines.map((line) => padLine(line, width)),
   ];
 }

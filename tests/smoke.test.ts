@@ -691,6 +691,51 @@ test("settings overlay persists editor chrome toggle", async () => {
   });
 });
 
+test("settings overlay persists status bar layout", async () => {
+  await withTempSettings(async ({ cwd }) => {
+    const harness = createHarness(cwd);
+    await harness.startWithMountedEditor();
+
+    const { promise, state } = await harness.openSettings();
+    state.panel.settingsList.onChange("statusBar", JSON.stringify({
+      topLeft: ["plugin.a"],
+      topRight: ["plugin.b"],
+      bottomLeft: ["projectDir"],
+      bottomRight: ["git"],
+      hidden: ["plugin.c"],
+    }));
+    state.done();
+    await promise;
+
+    const settings = JSON.parse(readFileSync(join(cwd, ".pi", "settings.json"), "utf-8"));
+    assert.deepEqual(settings.agentKit.statusBar, {
+      topLeft: ["plugin.a"],
+      topRight: ["plugin.b"],
+      bottomLeft: ["projectDir"],
+      bottomRight: ["git"],
+      hidden: ["plugin.c"],
+    });
+  });
+});
+
+test("other plugin statuses appear above the mounted editor", async () => {
+  await withTempSettings(async ({ cwd }) => {
+    const harness = createHarness(cwd, { synchronousEditorComponent: true });
+    await harness.startWithMountedEditor();
+    harness.footerFactories[0]?.(harness.tui, {}, {
+      getExtensionStatuses: () => new Map([
+        ["agent-kit-fast", "⚡"],
+        ["ext.hint", "HintOK"],
+      ]),
+    });
+
+    const lines = harness.mountedEditor.render(120);
+    assert.equal(lines[0]?.includes("HintOK"), true);
+    assert.equal(lines[0]?.includes("⚡"), false);
+    assert.equal(lines[0]?.includes("▌"), false);
+  });
+});
+
 test("settings overlay persists chrome layout side and order", async () => {
   await withTempSettings(async ({ cwd }) => {
     const harness = createHarness(cwd);
@@ -1049,19 +1094,21 @@ test("editor chrome shows project dir left of git status, hides via showProjectD
       },
     };
 
-    const withDir = renderEditorChrome({
-      ...base,
-      showProjectDir: true,
-      showGitStatus: true,
-    });
+    const withDir = renderEditorChrome({ ...base });
     const line = withDir.find((l) => l.includes("my-project") && l.includes("main")) ?? "";
     const plain = line.replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, "").trimEnd();
     assert.ok(plain.indexOf("my-project") < plain.indexOf("main"), `dir should sit left of git: ${plain}`);
+    assert.equal(line.includes("▌"), false);
 
     const dirOnly = renderEditorChrome({
       ...base,
-      showProjectDir: true,
-      showGitStatus: false,
+      statusBar: {
+        topLeft: [],
+        topRight: [],
+        bottomLeft: [],
+        bottomRight: ["projectDir"],
+        hidden: ["git"],
+      },
     });
     const dirPlain = (dirOnly.find((l) => l.includes("my-project")) ?? "")
       .replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, "")
@@ -1070,8 +1117,13 @@ test("editor chrome shows project dir left of git status, hides via showProjectD
 
     const hidden = renderEditorChrome({
       ...base,
-      showProjectDir: false,
-      showGitStatus: true,
+      statusBar: {
+        topLeft: [],
+        topRight: [],
+        bottomLeft: [],
+        bottomRight: ["git"],
+        hidden: ["projectDir"],
+      },
     });
     assert.equal(hidden.some((l) => l.includes("my-project")), false);
   } finally {

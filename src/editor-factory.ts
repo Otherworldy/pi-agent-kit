@@ -4,6 +4,7 @@ import type { AgentKitConfig } from "./config.ts";
 import { AGENT_KIT_EDITOR_FACTORY, formatWorkingElapsedMs, getWorkingElapsedMs, workingSpinnerFrame } from "./plugin-state.ts";
 import { renderEditorChrome } from "./editor-chrome.ts";
 import { getFastChromeLabel, getProviderCompatChromeLabel } from "./status-updater.ts";
+import { collectExtensionStatuses } from "./extension-status.ts";
 import { formatTpsLabel } from "./tps.ts";
 import { formatTtftLabel } from "./ttft.ts";
 
@@ -47,11 +48,11 @@ export function wrapEditorFactory(
           workingElapsedLabel: formatWorkingElapsedMs(getWorkingElapsedMs(state)),
           tpsLabel: formatTpsLabel(state.tpsMeter.getTps()),
           ttftLabel: formatTtftLabel(state.ttftMeter.getAverageMs()),
-          showGitStatus: config.showGitStatus,
-          showProjectDir: config.showProjectDir,
           display: config.chrome,
           workingLabel,
           borderColor: editor.borderColor,
+          extensionStatuses: collectExtensionStatuses(state.footerDataRef),
+          statusBar: config.statusBar,
           renderBase: originalRender,
         });
       };

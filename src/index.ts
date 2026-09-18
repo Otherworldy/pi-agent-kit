@@ -6,9 +6,11 @@ import {
   type AgentKitBooleanSettingKey,
   type AgentKitConfig,
   type EditorChromeDisplayConfig,
+  type StatusBarDisplayConfig,
   writeAgentKitSetting,
 } from "./config.ts";
 import { chromeDisplayEqual, normalizeChromeDisplay } from "./chrome-layout.ts";
+import { listStatusBarKeys, statusBarEqual } from "./extension-status.ts";
 import {
   formatFastHelp,
   formatFastStatusMessage,
@@ -65,9 +67,10 @@ export default function agentKitPlugin(pi: ExtensionAPI) {
   // Keep Pi's fullscreen dock, but omit the native footer because editor chrome
   // already shows the overlapping model/context/status information.
   function hideNativeFooter(ctx: any): void {
-    ctx.ui.setFooter?.(() => ({
-      render: () => [],
-    }));
+    ctx.ui.setFooter?.((_tui: unknown, _theme: unknown, footerData: unknown) => {
+      state.footerDataRef = footerData as PluginState["footerDataRef"];
+      return { render: () => [] };
+    });
   }
 
   function refreshProviderCompatProviders(ctx: any): void {
@@ -154,6 +157,21 @@ export default function agentKitPlugin(pi: ExtensionAPI) {
     if (!persisted) notify(ctx, "pi-agent-kit setting changed but was not persisted; check settings.json", "warning");
   }
 
+  function applyStatusBarLayout(ctx: any, display: StatusBarDisplayConfig): void {
+    const next = {
+      topLeft: [...display.topLeft],
+      topRight: [...display.topRight],
+      bottomLeft: [...display.bottomLeft],
+      bottomRight: [...display.bottomRight],
+      hidden: [...display.hidden],
+    };
+    if (statusBarEqual(config.statusBar, next)) return;
+    config.statusBar = next;
+    state.tuiRef?.requestRender?.();
+    const persisted = writeAgentKitSetting(ctx.cwd, { statusBar: config.statusBar });
+    if (!persisted) notify(ctx, "pi-agent-kit setting changed but was not persisted; check settings.json", "warning");
+  }
+
   /**
    * 打开设置面板
    */
@@ -168,6 +186,8 @@ export default function agentKitPlugin(pi: ExtensionAPI) {
       config,
       (key, value) => applySetting(ctx, key, value),
       (display) => applyChromeLayout(ctx, display),
+      (display) => applyStatusBarLayout(ctx, display),
+      listStatusBarKeys(state.footerDataRef, config.statusBar),
     );
   }
 

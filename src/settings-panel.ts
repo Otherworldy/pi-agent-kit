@@ -7,13 +7,24 @@ import {
   parseChromeLayoutValue,
   serializeChromeLayout,
 } from "./chrome-layout.ts";
-import type { AgentKitBooleanSettingKey, AgentKitConfig, EditorChromeDisplayConfig } from "./config.ts";
+import type { AgentKitBooleanSettingKey, AgentKitConfig, EditorChromeDisplayConfig, StatusBarDisplayConfig } from "./config.ts";
+import {
+  formatStatusBarSummary,
+  parseStatusBarLayoutValue,
+  resolveStatusBarLayout,
+  serializeStatusBarLayout,
+  STATUS_BAR_LABELS,
+  STATUS_BAR_SIDES,
+  statusBarFromGroups,
+} from "./extension-status.ts";
 
 export interface AgentKitSettingsPanelOptions {
   config: AgentKitConfig;
+  statusBarKeys: string[];
   borderColor: (text: string) => string;
   onChange: (key: AgentKitBooleanSettingKey, value: boolean) => void;
   onChromeChange: (display: EditorChromeDisplayConfig) => void;
+  onStatusBarChange: (display: StatusBarDisplayConfig) => void;
   onCancel: () => void;
 }
 
@@ -76,18 +87,23 @@ export class AgentKitSettingsPanel extends Container {
         }),
       },
       {
-        id: "showGitStatus",
-        label: "Git status",
-        description: "Show git branch and change summary outside the input panel at the bottom-right.",
-        currentValue: options.config.showGitStatus ? "true" : "false",
-        values: ["true", "false"],
-      },
-      {
-        id: "showProjectDir",
-        label: "Project directory",
-        description: "Show the current project folder name at the bottom-right next to git status.",
-        currentValue: options.config.showProjectDir ? "true" : "false",
-        values: ["true", "false"],
+        id: "statusBar",
+        label: "Status bar",
+        description: "Place plugin statuses, project directory, and git around the input (top/bottom, left/right).",
+        currentValue: formatStatusBarSummary(options.config.statusBar),
+        submenu: (_current: string, done: (selectedValue?: string) => void) => {
+          const keys = options.statusBarKeys;
+          return new ChromeLayoutEditor({
+            display: resolveStatusBarLayout(options.config.statusBar, keys),
+            allSlots: keys,
+            sides: STATUS_BAR_SIDES,
+            labels: STATUS_BAR_LABELS,
+            emptyHint: "  No status items",
+            theme: getSettingsListTheme(),
+            onConfirm: (next) => done(serializeStatusBarLayout(statusBarFromGroups(next, keys))),
+            onCancel: () => done(),
+          });
+        },
       },
       {
         id: "notificationChannels.windowsToast.enabled",
@@ -131,6 +147,13 @@ export class AgentKitSettingsPanel extends Container {
           this.settingsList.updateValue("chrome", formatChromeLayoutSummary(parsed));
           return;
         }
+        if (id === "statusBar") {
+          const parsed = parseStatusBarLayoutValue(newValue);
+          if (!parsed) return;
+          options.onStatusBarChange(parsed);
+          this.settingsList.updateValue("statusBar", formatStatusBarSummary(parsed));
+          return;
+        }
         options.onChange(id as AgentKitBooleanSettingKey, newValue === "true");
       },
       options.onCancel,
@@ -152,13 +175,17 @@ export function showAgentKitSettingsPanel(
   config: AgentKitConfig,
   onChange: (key: AgentKitBooleanSettingKey, value: boolean) => void,
   onChromeChange: (display: EditorChromeDisplayConfig) => void,
+  onStatusBarChange: (display: StatusBarDisplayConfig) => void,
+  statusBarKeys: string[] = [],
 ): Promise<void> {
   return ctx.ui.custom((_tui: any, theme: Theme, _keybindings: any, done: () => void) => {
     const panel = new AgentKitSettingsPanel({
       config,
+      statusBarKeys,
       borderColor: (text) => theme.fg("border", text),
       onChange,
       onChromeChange,
+      onStatusBarChange,
       onCancel: done,
     });
 

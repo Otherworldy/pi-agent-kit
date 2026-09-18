@@ -77,6 +77,29 @@ export interface EditorChromeDisplayConfig {
   right: EditorChromeSlot[];
 }
 
+export const STATUS_BAR_SIDES = ["topLeft", "topRight", "bottomLeft", "bottomRight"] as const;
+export type StatusBarSide = typeof STATUS_BAR_SIDES[number];
+
+export const BUILTIN_STATUS_KEYS = ["projectDir", "git"] as const;
+export type BuiltinStatusKey = typeof BUILTIN_STATUS_KEYS[number];
+
+/** Corners around the input. Empty corners+hidden = auto (plugins top-left, projectDir/git bottom-right). */
+export interface StatusBarDisplayConfig {
+  topLeft: string[];
+  topRight: string[];
+  bottomLeft: string[];
+  bottomRight: string[];
+  hidden: string[];
+}
+
+export const EMPTY_STATUS_BAR: StatusBarDisplayConfig = {
+  topLeft: [],
+  topRight: [],
+  bottomLeft: [],
+  bottomRight: [],
+  hidden: [],
+};
+
 export interface AgentKitConfig {
   showGitStatus: boolean;
   showProjectDir: boolean;
@@ -85,6 +108,7 @@ export interface AgentKitConfig {
   editorChrome: boolean;
   /** Meta-line layout: which fields on left/right and in what order. */
   chrome: EditorChromeDisplayConfig;
+  statusBar: StatusBarDisplayConfig;
   fast: FastModeConfig;
   providerCompat: ProviderCompatSwitchConfig;
   claudeCodeCompat: ProviderCompatConfig;
@@ -101,8 +125,9 @@ export type AgentKitBooleanSettingKey =
   | "providerCompat"
   | "fast.enabled";
 
-export type AgentKitConfigUpdates = Partial<Omit<AgentKitConfig, "chrome" | "fast" | "notificationChannels" | "providerCompat" | "claudeCodeCompat" | "codexCompat">> & {
+export type AgentKitConfigUpdates = Partial<Omit<AgentKitConfig, "chrome" | "statusBar" | "fast" | "notificationChannels" | "providerCompat" | "claudeCodeCompat" | "codexCompat">> & {
   chrome?: Partial<EditorChromeDisplayConfig>;
+  statusBar?: Partial<StatusBarDisplayConfig>;
   fast?: Partial<FastModeConfig>;
   notificationChannels?: {
     windowsToast?: Partial<WindowsToastNotificationChannelConfig>;
@@ -252,6 +277,13 @@ const DEFAULT_CONFIG: AgentKitConfig = {
   chrome: {
     left: ["model", "thinking", "timer", "tps", "ttft", "providerCompat", "fast"],
     right: ["cost", "context"],
+  },
+  statusBar: {
+    topLeft: [],
+    topRight: [],
+    bottomLeft: [],
+    bottomRight: [],
+    hidden: [],
   },
   showProjectDir: true,
   fast: {
@@ -488,6 +520,47 @@ function parseChromeSlots(value: unknown, fallback: readonly EditorChromeSlot[])
   return slots;
 }
 
+function parseStringSlots(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  const slots: string[] = [];
+  const seen = new Set<string>();
+  for (const item of value) {
+    if (typeof item !== "string" || !item || seen.has(item)) continue;
+    seen.add(item);
+    slots.push(item);
+  }
+  return slots;
+}
+
+function parseStatusBarConfig(agentKit: unknown): StatusBarDisplayConfig {
+  const raw = isRecord(agentKit) && isRecord(agentKit.statusBar) ? agentKit.statusBar : undefined;
+  const topLeft = parseStringSlots(raw?.topLeft ?? raw?.left);
+  const used = new Set(topLeft);
+  const take = (value: unknown) => parseStringSlots(value).filter((key) => {
+    if (used.has(key)) return false;
+    used.add(key);
+    return true;
+  });
+  const topRight = take(raw?.topRight ?? raw?.right);
+  const bottomLeft = take(raw?.bottomLeft);
+  const bottomRight = take(raw?.bottomRight);
+  const hidden = take(raw?.hidden);
+  const empty = topLeft.length + topRight.length + bottomLeft.length + bottomRight.length + hidden.length === 0;
+  if (empty) {
+    const seeded: string[] = [];
+    if (boolFromObject(agentKit, "showGitStatus") === false) seeded.push("git");
+    if (boolFromObject(agentKit, "showProjectDir") === false) seeded.push("projectDir");
+    return {
+      topLeft: [],
+      topRight: [],
+      bottomLeft: [],
+      bottomRight: [],
+      hidden: seeded,
+    };
+  }
+  return { topLeft, topRight, bottomLeft, bottomRight, hidden };
+}
+
 function parseChromeDisplayConfig(agentKit: unknown): EditorChromeDisplayConfig {
   const chrome = isRecord(agentKit) && isRecord(agentKit.chrome) ? agentKit.chrome : undefined;
   const d = DEFAULT_CONFIG.chrome;
@@ -614,6 +687,7 @@ export function parseAgentKitConfig(settings: Record<string, unknown>): AgentKit
     editorChrome: boolFromObject(agentKit, "editorChrome")
       ?? DEFAULT_CONFIG.editorChrome,
     chrome: parseChromeDisplayConfig(agentKit),
+    statusBar: parseStatusBarConfig(agentKit),
     fast: parseFastConfig(agentKit),
     providerCompat,
     claudeCodeCompat: parseProviderCompatConfig(
@@ -635,7 +709,18 @@ export function nextAgentKitSetting(
   updates: AgentKitConfigUpdates,
 ): unknown {
   const existing = isRecord(existingAgentKitSetting) ? existingAgentKitSetting : {};
-  return mergeSettings(existing as Record<string, unknown>, updates as Record<string, unknown>);
+  const { statusBar, ...rest } = updates;
+  const merged = mergeSettings(existing as Record<string, unknown>, rest as Record<string, unknown>);
+  if (statusBar) {
+    merged.statusBar = {
+      topLeft: [...(statusBar.topLeft ?? [])],
+      topRight: [...(statusBar.topRight ?? [])],
+      bottomLeft: [...(statusBar.bottomLeft ?? [])],
+      bottomRight: [...(statusBar.bottomRight ?? [])],
+      hidden: [...(statusBar.hidden ?? [])],
+    };
+  }
+  return merged;
 }
 
 export function writeAgentKitSetting(

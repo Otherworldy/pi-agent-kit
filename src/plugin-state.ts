@@ -1,5 +1,6 @@
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { ContinueFailureSnapshot } from "./continue-mode.ts";
+import type { FooterDataLike } from "./extension-status.ts";
 import { TpsMeter } from "./tps.ts";
 import { TtftMeter } from "./ttft.ts";
 
@@ -11,6 +12,7 @@ export interface PluginState {
   // TUI引用
   tuiRef: any | null;
   activeCtxRef: ExtensionContext | null;
+  footerDataRef: FooterDataLike | null;
 
   // 编辑器工厂
   originalEditorFactory: EditorFactory | undefined;
@@ -80,6 +82,7 @@ export function createPluginState(): PluginState {
   return {
     tuiRef: null,
     activeCtxRef: null,
+    footerDataRef: null,
     originalEditorFactory: undefined,
     wrappedEditorFactory: undefined,
     activeThinkingLevel: "off",
@@ -207,6 +210,7 @@ export function resetPluginState(state: PluginState): void {
   stopWorkingSpinner(state);
   state.lastWorkingElapsedMs = 0;
   state.tuiRef = null;
+  state.footerDataRef = null;
   state.lastContinueFailure = null;
   state.pendingContinueRequest = null;
   state.tpsMeter.reset();
@@ -224,6 +228,7 @@ export function cleanupPluginState(state: PluginState): void {
   state.registeredCodexCompatProviders = new Set();
   state.previousCompatProviderConfigs.clear();
   state.tuiRef = null;
+  state.footerDataRef = null;
   state.activeCtxRef = null;
   state.currentModelRef = null;
   state.lastContinueFailure = null;
