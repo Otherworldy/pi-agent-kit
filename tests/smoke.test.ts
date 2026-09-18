@@ -691,6 +691,27 @@ test("settings overlay persists editor chrome toggle", async () => {
   });
 });
 
+test("settings overlay persists chrome layout side and order", async () => {
+  await withTempSettings(async ({ cwd }) => {
+    const harness = createHarness(cwd);
+    await harness.startWithMountedEditor();
+
+    const { promise, state } = await harness.openSettings();
+    state.panel.settingsList.onChange("chrome", JSON.stringify({
+      left: ["thinking", "model"],
+      right: ["context"],
+    }));
+    state.done();
+    await promise;
+
+    const settings = JSON.parse(readFileSync(join(cwd, ".pi", "settings.json"), "utf-8"));
+    assert.deepEqual(settings.agentKit.chrome, {
+      left: ["thinking", "model"],
+      right: ["context"],
+    });
+  });
+});
+
 test("fast command toggles status, editor chrome label, and provider payload", async () => {
   await withTempSettings(async ({ cwd }) => {
     const settingsPath = join(cwd, ".pi", "settings.json");

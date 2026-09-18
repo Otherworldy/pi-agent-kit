@@ -5,8 +5,10 @@ import {
   readSettings,
   type AgentKitBooleanSettingKey,
   type AgentKitConfig,
+  type EditorChromeDisplayConfig,
   writeAgentKitSetting,
 } from "./config.ts";
+import { chromeDisplayEqual, normalizeChromeDisplay } from "./chrome-layout.ts";
 import {
   formatFastHelp,
   formatFastStatusMessage,
@@ -143,6 +145,15 @@ export default function agentKitPlugin(pi: ExtensionAPI) {
     }
   }
 
+  function applyChromeLayout(ctx: any, display: EditorChromeDisplayConfig): void {
+    const next = normalizeChromeDisplay(display);
+    if (chromeDisplayEqual(config.chrome, next)) return;
+    config.chrome = { left: [...next.left], right: [...next.right] };
+    state.tuiRef?.requestRender?.();
+    const persisted = writeAgentKitSetting(ctx.cwd, { chrome: config.chrome });
+    if (!persisted) notify(ctx, "pi-agent-kit setting changed but was not persisted; check settings.json", "warning");
+  }
+
   /**
    * 打开设置面板
    */
@@ -152,7 +163,12 @@ export default function agentKitPlugin(pi: ExtensionAPI) {
       return;
     }
 
-    await showAgentKitSettingsPanel(ctx, config, (key, value) => applySetting(ctx, key, value));
+    await showAgentKitSettingsPanel(
+      ctx,
+      config,
+      (key, value) => applySetting(ctx, key, value),
+      (display) => applyChromeLayout(ctx, display),
+    );
   }
 
   /**

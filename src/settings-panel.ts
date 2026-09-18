@@ -1,12 +1,19 @@
 import { Container, SettingsList, truncateToWidth, visibleWidth, type Component } from "@earendil-works/pi-tui";
 import { getSettingsListTheme, type Theme } from "@earendil-works/pi-coding-agent";
 
-import type { AgentKitBooleanSettingKey, AgentKitConfig } from "./config.ts";
+import {
+  ChromeLayoutEditor,
+  formatChromeLayoutSummary,
+  parseChromeLayoutValue,
+  serializeChromeLayout,
+} from "./chrome-layout.ts";
+import type { AgentKitBooleanSettingKey, AgentKitConfig, EditorChromeDisplayConfig } from "./config.ts";
 
 export interface AgentKitSettingsPanelOptions {
   config: AgentKitConfig;
   borderColor: (text: string) => string;
   onChange: (key: AgentKitBooleanSettingKey, value: boolean) => void;
+  onChromeChange: (display: EditorChromeDisplayConfig) => void;
   onCancel: () => void;
 }
 
@@ -57,6 +64,18 @@ export class AgentKitSettingsPanel extends Container {
         values: ["true", "false"],
       },
       {
+        id: "chrome",
+        label: "Chrome layout",
+        description: "Choose which fields appear on the input meta line, which side, and in what order.",
+        currentValue: formatChromeLayoutSummary(options.config.chrome),
+        submenu: (_current: string, done: (selectedValue?: string) => void) => new ChromeLayoutEditor({
+          display: options.config.chrome,
+          theme: getSettingsListTheme(),
+          onConfirm: (display) => done(serializeChromeLayout(display)),
+          onCancel: () => done(),
+        }),
+      },
+      {
         id: "showGitStatus",
         label: "Git status",
         description: "Show git branch and change summary outside the input panel at the bottom-right.",
@@ -104,7 +123,16 @@ export class AgentKitSettingsPanel extends Container {
       items,
       items.length,
       getSettingsListTheme(),
-      (id, newValue) => options.onChange(id as AgentKitBooleanSettingKey, newValue === "true"),
+      (id, newValue) => {
+        if (id === "chrome") {
+          const parsed = parseChromeLayoutValue(newValue);
+          if (!parsed) return;
+          options.onChromeChange(parsed);
+          this.settingsList.updateValue("chrome", formatChromeLayoutSummary(parsed));
+          return;
+        }
+        options.onChange(id as AgentKitBooleanSettingKey, newValue === "true");
+      },
       options.onCancel,
     );
     this.addChild(new BorderedPanel(this.settingsList, options.borderColor));
@@ -123,12 +151,14 @@ export function showAgentKitSettingsPanel(
   ctx: any,
   config: AgentKitConfig,
   onChange: (key: AgentKitBooleanSettingKey, value: boolean) => void,
+  onChromeChange: (display: EditorChromeDisplayConfig) => void,
 ): Promise<void> {
   return ctx.ui.custom((_tui: any, theme: Theme, _keybindings: any, done: () => void) => {
     const panel = new AgentKitSettingsPanel({
       config,
       borderColor: (text) => theme.fg("border", text),
       onChange,
+      onChromeChange,
       onCancel: done,
     });
 
@@ -137,8 +167,8 @@ export function showAgentKitSettingsPanel(
     overlay: true,
     overlayOptions: {
       anchor: "center",
-      width: 64,
-      maxHeight: 20,
+      width: 72,
+      maxHeight: 24,
     },
   });
 }
