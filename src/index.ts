@@ -64,13 +64,30 @@ export default function agentKitPlugin(pi: ExtensionAPI) {
 
   const ensureEditorFactoryInstalledBound = (ctx: any) => ensureEditorFactoryInstalled(ctx, state, config);
 
+  const AGENT_KIT_FOOTER = Symbol("pi-agent-kit.footer");
+
   // Keep Pi's fullscreen dock, but omit the native footer because editor chrome
   // already shows the overlapping model/context/status information.
+  // setFooter is last-writer-wins (pi-cc-extensions also claims it on session_start).
   function hideNativeFooter(ctx: any): void {
-    ctx.ui.setFooter?.((_tui: unknown, _theme: unknown, footerData: unknown) => {
+    if (typeof ctx.ui?.setFooter !== "function") return;
+
+    const empty = (_tui: unknown, _theme: unknown, footerData: unknown) => {
       state.footerDataRef = footerData as PluginState["footerDataRef"];
       return { render: () => [] };
-    });
+    };
+
+    if (!ctx.ui.setFooter[AGENT_KIT_FOOTER]) {
+      const original = ctx.ui.setFooter.bind(ctx.ui);
+      const wrapped = ((factory: unknown) => {
+        if (factory === undefined) return original(undefined);
+        return original(empty);
+      }) as typeof ctx.ui.setFooter;
+      wrapped[AGENT_KIT_FOOTER] = true;
+      ctx.ui.setFooter = wrapped;
+    }
+
+    ctx.ui.setFooter(empty);
   }
 
   function refreshProviderCompatProviders(ctx: any): void {

@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { basename } from "node:path";
 import type { ThemeColor } from "@earendil-works/pi-coding-agent";
-import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import { CURSOR_MARKER, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import type { EditorChromeDisplayConfig, EditorChromeSlot, StatusBarDisplayConfig } from "./config.ts";
 import { EMPTY_STATUS_BAR, resolveStatusBarLayout, type ExtensionStatusItem } from "./extension-status.ts";
 
@@ -51,6 +51,8 @@ export interface EditorChromeRenderInput {
   workingLabel?: string;
   /** Pi editor border: thinking level, or green in bash (!) mode. */
   borderColor?: (text: string) => string;
+  /** When true, keep/restore CURSOR_MARKER so IME follows the caret. */
+  focused?: boolean;
   /** Other plugins' setStatus texts, rendered above the input panel. */
   extensionStatuses?: ExtensionStatusItem[];
   statusBar?: StatusBarDisplayConfig;
@@ -258,8 +260,20 @@ function formatGitLabel(theme: ThemeLike | undefined, git: GitInfo, maxWidth: nu
 }
 
 function padLine(line: string, width: number): string {
+  // truncateToWidth can drop APC (CURSOR_MARKER) when it rebuilds a line.
+  if (line.includes(CURSOR_MARKER) && visibleWidth(line) <= width) {
+    return line + " ".repeat(width - visibleWidth(line));
+  }
   const clipped = truncateToWidth(line, width, "");
   return clipped + " ".repeat(Math.max(0, width - visibleWidth(clipped)));
+}
+
+/** IME follows the hardware caret at CURSOR_MARKER, not the fake reverse-video cursor. */
+function ensureCursorMarker(line: string): string {
+  if (line.includes(CURSOR_MARKER)) return line;
+  const fake = line.indexOf("\x1b[7m");
+  if (fake === -1) return line;
+  return line.slice(0, fake) + CURSOR_MARKER + line.slice(fake);
 }
 
 // Shared light tone for model / ctx / provider-compat meta items.
@@ -581,7 +595,10 @@ export function renderEditorChrome(input: EditorChromeRenderInput): string[] {
   return [
     ...(top ? [top] : []),
     ...topPad,
-    ...split.bodyLines.map((line) => paint(line)),
+    ...split.bodyLines.map((line) => {
+      const painted = paint(line);
+      return input.focused ? ensureCursorMarker(painted) : painted;
+    }),
     ...metaGap,
     paint(meta),
     ...bottomPad,

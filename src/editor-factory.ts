@@ -18,6 +18,9 @@ export function wrapEditorFactory(
 ): AgentKitEditorFactory {
   const wrapped = ((tui: any, theme: any, keybindings: any) => {
     state.tuiRef = tui;
+    // Windows IME (and some terminals) ignore a hidden caret and glue
+    // preedit to the end of a full-width padded chrome line.
+    if (process.platform === "win32") tui.setShowHardwareCursor?.(true);
     const editor = factory
       ? factory(tui, theme, keybindings)
       : new CustomEditor(tui, theme, keybindings);
@@ -51,6 +54,7 @@ export function wrapEditorFactory(
           display: config.chrome,
           workingLabel,
           borderColor: editor.borderColor,
+          focused: Boolean(editor.focused),
           extensionStatuses: collectExtensionStatuses(state.footerDataRef),
           statusBar: config.statusBar,
           renderBase: originalRender,

@@ -5,6 +5,7 @@ import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { initTheme } from "@earendil-works/pi-coding-agent";
+import { CURSOR_MARKER, visibleWidth } from "@earendil-works/pi-tui";
 import { clearEditorChromeGitCache, renderEditorChrome } from "../src/editor-chrome.ts";
 import agentKitPlugin from "../src/index.ts";
 import { buildClaudeMetadataUserId } from "../src/provider-compat.ts";
@@ -438,6 +439,20 @@ test("startup replaces only Pi's native footer, not the fullscreen layout", asyn
   });
 });
 
+test("startup footer wrap keeps a later setFooter empty", async () => {
+  await withTempSettings(async ({ cwd }) => {
+    const harness = createHarness(cwd);
+    await harness.startWithMountedEditor();
+
+    harness.ctx.ui.setFooter(() => ({ render: () => ["stolen"] }));
+    const last = harness.footerFactories.at(-1);
+    assert.deepEqual(last?.(harness.tui, {}, {})?.render(80), []);
+
+    harness.ctx.ui.setFooter(undefined);
+    assert.equal(harness.footerFactories.at(-1), undefined);
+  });
+});
+
 test("settings overlay persists local and Telegram notification toggles", async () => {
   await withTempSettings(async ({ cwd }) => {
     const harness = createHarness(cwd);
@@ -650,6 +665,32 @@ test("editor chrome left bar falls back to thinking color without borderColor", 
   });
 
   assert.ok(lines.some((line) => line.includes("[TH]▌")));
+});
+
+test("editor chrome keeps IME cursor marker at the caret, not the right edge", () => {
+  const fakeCursor = "\x1b[7m \x1b[0m";
+  const width = 80;
+  const lines = renderEditorChrome({
+    width,
+    enabled: true,
+    focused: true,
+    context: {
+      cwd: process.cwd(),
+      model: { id: "model" },
+      ui: { theme: { fg: (_kind: string, text: string) => text } },
+    },
+    thinkingLevel: "off",
+    renderBase: (w) => [
+      "─".repeat(w),
+      fakeCursor + " ".repeat(Math.max(0, w - 1)),
+      "─".repeat(w),
+    ],
+  });
+  const hit = lines.find((line) => line.includes(CURSOR_MARKER));
+  assert.ok(hit, "focused chrome must emit CURSOR_MARKER for IME");
+  const col = visibleWidth(hit!.slice(0, hit!.indexOf(CURSOR_MARKER)));
+  assert.ok(col < 10, `IME caret should sit at the left rail, got col ${col}`);
+  assert.ok(col < visibleWidth(hit!) - 3, "IME caret must not sit at the right edge");
 });
 
 test("editor chrome keeps autocomplete popup rows below the custom border", async () => {
