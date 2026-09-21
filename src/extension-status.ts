@@ -124,8 +124,11 @@ function collectNodeText(node: { text?: unknown; children?: unknown[] }, out: st
   }
 }
 
-/** Global extensions run session_start before packages, so leftover widgets must be scraped then blanked.
- * ponytail: blanks native widget containers (string + factory). Keep factory widgets if a live todo list must stay. */
+/** Global extensions run session_start before packages, so leftover widgets must be scraped then cleared.
+ * Pi's renderWidgetContainer rebuilds each widget container from the extension
+ * widget maps on every renderWidgets(), so clearing once is enough: harvested
+ * string widgets are already deleted via setWidget(key, undefined), and later
+ * factory widgets (e.g. pi-processes) keep rendering normally. */
 export function harvestAndBlankWidgetContainers(
   tui: { children?: unknown[] } | null | undefined,
   editor: unknown,
@@ -145,13 +148,14 @@ export function harvestAndBlankWidgetContainers(
   ];
   for (const [node, key] of pairs) {
     if (!node || typeof node !== "object") continue;
-    const container = node as { render?: (width: number) => string[]; children?: unknown[] };
+    const container = node as { render?: (width: number) => string[]; clear?: () => void; children?: unknown[] };
     if (typeof container.render !== "function") continue;
     const texts: string[] = [];
     collectNodeText(container, texts);
     const text = texts.join(" · ");
     if (text) map.set(key, text);
-    container.render = () => [];
+    if (typeof container.clear === "function") container.clear();
+    else if (Array.isArray(container.children)) container.children.length = 0;
   }
 }
 

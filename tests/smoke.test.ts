@@ -794,7 +794,7 @@ test("string widgets are absorbed into the status bar and native widget output i
     await harness.startWithMountedEditor();
 
     const lines = harness.mountedEditor.render(120);
-    assert.deepEqual(leftover.render(), []);
+    assert.deepEqual(leftover.children, []);
     assert.equal(lines.some((line: string) => line.includes("ZCode Pi host test widget")), true);
 
     harness.ctx.ui.setWidget("live", ["LiveW"], { placement: "belowEditor" });

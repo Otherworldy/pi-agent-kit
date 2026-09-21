@@ -101,7 +101,9 @@ test("string widgets are captured for the status bar and leftover containers are
     map,
   );
   assert.equal(map.get(WIDGET_BELOW_KEY), "ZCode Pi host test widget");
-  assert.deepEqual(below.render(), []);
+  // Cleared once so Pi's renderWidgetContainer rebuild keeps later factory widgets visible.
+  assert.deepEqual(below.children, []);
+  assert.deepEqual(below.render(), ["ZCode Pi host test widget"]);
 });
 
 test("status bar parse/serialize drops duplicates and own keys", () => {
