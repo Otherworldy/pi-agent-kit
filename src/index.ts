@@ -10,7 +10,7 @@ import {
   writeAgentKitSetting,
 } from "./config.ts";
 import { chromeDisplayEqual, normalizeChromeDisplay } from "./chrome-layout.ts";
-import { listStatusBarKeys, statusBarEqual } from "./extension-status.ts";
+import { applyWidgetStatus, listStatusBarKeys, statusBarEqual } from "./extension-status.ts";
 import {
   formatFastHelp,
   formatFastStatusMessage,
@@ -88,6 +88,26 @@ export default function agentKitPlugin(pi: ExtensionAPI) {
     }
 
     ctx.ui.setFooter(empty);
+  }
+
+  const AGENT_KIT_WIDGET = Symbol("pi-agent-kit.widget");
+
+  // Global ~/.pi/agent/extensions run session_start before packages, so wrap
+  // setWidget and also scrape leftover native widget containers.
+  function hideNativeWidgets(ctx: any): void {
+    if (typeof ctx.ui?.setWidget !== "function") return;
+
+    if (!ctx.ui.setWidget[AGENT_KIT_WIDGET]) {
+      const original = ctx.ui.setWidget.bind(ctx.ui);
+      const wrapped = ((key: string, content: unknown, options?: unknown) => {
+        const mode = applyWidgetStatus(state.widgetStatuses, key, content);
+        if (mode === "passthrough") return original(key, content, options);
+        original(key, undefined, options);
+        state.tuiRef?.requestRender?.();
+      }) as typeof ctx.ui.setWidget;
+      wrapped[AGENT_KIT_WIDGET] = true;
+      ctx.ui.setWidget = wrapped;
+    }
   }
 
   function refreshProviderCompatProviders(ctx: any): void {
@@ -204,7 +224,7 @@ export default function agentKitPlugin(pi: ExtensionAPI) {
       (key, value) => applySetting(ctx, key, value),
       (display) => applyChromeLayout(ctx, display),
       (display) => applyStatusBarLayout(ctx, display),
-      listStatusBarKeys(state.footerDataRef, config.statusBar),
+      listStatusBarKeys(state.footerDataRef, config.statusBar, state.widgetStatuses),
     );
   }
 
@@ -384,6 +404,7 @@ export default function agentKitPlugin(pi: ExtensionAPI) {
       // ignore older Pi versions without the API
     }
     hideNativeFooter(ctx);
+    hideNativeWidgets(ctx);
     ensureEditorFactoryInstalledBound(ctx);
   });
 

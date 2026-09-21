@@ -103,6 +103,7 @@ function createHarness(cwd: string, options: { synchronousEditorComponent?: bool
   const notifies: Array<{ message: string; type: string | undefined }> = [];
   const sentMessages: Array<{ message: unknown; options: unknown }> = [];
   const statuses = new Map<string, string>();
+  const widgets = new Map<string, { content: unknown; options: unknown }>();
   const flags = new Map<string, boolean | string>();
   const providerRegistrations = new Map<string, unknown>();
   const editorFactories: unknown[] = [];
@@ -132,6 +133,10 @@ function createHarness(cwd: string, options: { synchronousEditorComponent?: bool
     setStatus(key: string, text: string | undefined) {
       if (text === undefined) statuses.delete(key);
       else statuses.set(key, text);
+    },
+    setWidget(key: string, content: unknown, options?: unknown) {
+      if (content === undefined) widgets.delete(key);
+      else widgets.set(key, { content, options });
     },
     theme: {
       fg: (_kind: string, text: string) => text,
@@ -233,6 +238,7 @@ function createHarness(cwd: string, options: { synchronousEditorComponent?: bool
     notifies,
     sentMessages,
     statuses,
+    widgets,
     editorFactories,
     handlers,
     commands,
@@ -774,6 +780,26 @@ test("other plugin statuses appear above the mounted editor", async () => {
     assert.equal(lines[0]?.includes("HintOK"), true);
     assert.equal(lines[0]?.includes("⚡"), false);
     assert.equal(lines[0]?.includes("▌"), false);
+  });
+});
+
+test("string widgets are absorbed into the status bar and native widget output is cleared", async () => {
+  await withTempSettings(async ({ cwd }) => {
+    const harness = createHarness(cwd, { synchronousEditorComponent: true });
+    const leftover = {
+      children: [{ text: "ZCode Pi host test widget" }],
+      render: () => ["ZCode Pi host test widget"],
+    };
+    harness.tui.children = [harness.editorContainer, leftover];
+    await harness.startWithMountedEditor();
+
+    const lines = harness.mountedEditor.render(120);
+    assert.deepEqual(leftover.render(), []);
+    assert.equal(lines.some((line: string) => line.includes("ZCode Pi host test widget")), true);
+
+    harness.ctx.ui.setWidget("live", ["LiveW"], { placement: "belowEditor" });
+    assert.equal(harness.widgets.has("live"), false);
+    assert.equal(harness.mountedEditor.render(120).some((line: string) => line.includes("LiveW")), true);
   });
 });
 

@@ -4,7 +4,7 @@ import type { AgentKitConfig } from "./config.ts";
 import { AGENT_KIT_EDITOR_FACTORY, formatWorkingElapsedMs, getWorkingElapsedMs, workingSpinnerFrame } from "./plugin-state.ts";
 import { renderEditorChrome } from "./editor-chrome.ts";
 import { getFastChromeLabel, getProviderCompatChromeLabel } from "./status-updater.ts";
-import { collectExtensionStatuses } from "./extension-status.ts";
+import { collectExtensionStatuses, harvestAndBlankWidgetContainers } from "./extension-status.ts";
 import { formatTpsLabel } from "./tps.ts";
 import { formatTtftLabel } from "./ttft.ts";
 
@@ -24,10 +24,16 @@ export function wrapEditorFactory(
     const editor = factory
       ? factory(tui, theme, keybindings)
       : new CustomEditor(tui, theme, keybindings);
+    harvestAndBlankWidgetContainers(tui, editor, state.widgetStatuses);
 
     const originalRender = editor.render?.bind(editor);
     if (originalRender) {
+      let harvested = false;
       editor.render = (width: number) => {
+        if (!harvested) {
+          harvestAndBlankWidgetContainers(tui, editor, state.widgetStatuses);
+          harvested = true;
+        }
         const theme = state.activeCtxRef?.ui?.theme as { fg?: (color: string, text: string) => string } | undefined;
         let workingLabel = "";
         const statusText = state.isWorking ? "esc interrupt" : "";
@@ -55,7 +61,7 @@ export function wrapEditorFactory(
           workingLabel,
           borderColor: editor.borderColor,
           focused: Boolean(editor.focused),
-          extensionStatuses: collectExtensionStatuses(state.footerDataRef),
+          extensionStatuses: collectExtensionStatuses(state.footerDataRef, state.widgetStatuses),
           statusBar: config.statusBar,
           renderBase: originalRender,
         });

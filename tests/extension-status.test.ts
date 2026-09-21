@@ -2,13 +2,16 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { renderEditorChrome } from "../src/editor-chrome.ts";
 import {
+  applyWidgetStatus,
   collectExtensionStatuses,
   formatStatusBarSummary,
+  harvestAndBlankWidgetContainers,
   isStatusBarAuto,
   listStatusBarKeys,
   parseStatusBarLayoutValue,
   resolveStatusBarLayout,
   statusBarFromGroups,
+  WIDGET_BELOW_KEY,
 } from "../src/extension-status.ts";
 import { parseAgentKitConfig } from "../src/config.ts";
 import { ChromeLayoutEditor } from "../src/chrome-layout.ts";
@@ -66,9 +69,39 @@ test("status bar collectors skip this plugin's own footer keys and include built
     listStatusBarKeys(
       { getExtensionStatuses: () => new Map([["agent-kit-fast", "⚡"], ["live", "L"]]) },
       { ...auto, topRight: ["saved"], hidden: ["gone"] },
+      new Map([["hint", "W"]]),
     ),
-    ["projectDir", "git", "live", "saved", "gone"],
+    ["projectDir", "git", "live", "hint", "saved", "gone"],
   );
+  assert.deepEqual(
+    collectExtensionStatuses(
+      { getExtensionStatuses: () => new Map([["zcode-test", "pi-ext ready"]]) },
+      new Map([["zcode-test", "ZCode Pi host test widget"]]),
+    ),
+    [{ key: "zcode-test", text: "pi-ext ready · ZCode Pi host test widget" }],
+  );
+});
+
+test("string widgets are captured for the status bar and leftover containers are blanked", () => {
+  const map = new Map<string, string>();
+  assert.equal(applyWidgetStatus(map, "zcode-test", ["ZCode Pi host test widget"]), "hide");
+  assert.equal(map.get("zcode-test"), "ZCode Pi host test widget");
+  assert.equal(applyWidgetStatus(map, "zcode-test", undefined), "hide");
+  assert.equal(map.has("zcode-test"), false);
+  assert.equal(applyWidgetStatus(map, "live", () => ({ render: () => ["x"] })), "passthrough");
+
+  const editor = { render: () => ["ed"] };
+  const below = {
+    children: [{ text: "ZCode Pi host test widget" }],
+    render: () => ["ZCode Pi host test widget"],
+  };
+  harvestAndBlankWidgetContainers(
+    { children: [{ children: [editor] }, below] },
+    editor,
+    map,
+  );
+  assert.equal(map.get(WIDGET_BELOW_KEY), "ZCode Pi host test widget");
+  assert.deepEqual(below.render(), []);
 });
 
 test("status bar parse/serialize drops duplicates and own keys", () => {

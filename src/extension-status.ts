@@ -20,7 +20,12 @@ export const OWN_STATUS_KEYS = new Set([
 export const STATUS_BAR_LABELS: Record<string, string> = {
   projectDir: "Project directory",
   git: "Git status",
+  "widget-above": "Widget above",
+  "widget-below": "Widget below",
 };
+
+export const WIDGET_ABOVE_KEY = "widget-above";
+export const WIDGET_BELOW_KEY = "widget-below";
 
 export type ExtensionStatusItem = { key: string; text: string };
 export type StatusBarCorners = Pick<StatusBarDisplayConfig, StatusBarSide>;
@@ -48,22 +53,29 @@ export function statusBarEqual(a: StatusBarDisplayConfig, b: StatusBarDisplayCon
   )) && chromeDisplayEqual({ left: a.hidden, right: [] }, { left: b.hidden, right: [] });
 }
 
-export function collectExtensionStatuses(footerData: FooterDataLike | null | undefined): ExtensionStatusItem[] {
+function takeStatusItem(key: string, text: unknown, merged: Map<string, string>): void {
+  if (!key || OWN_STATUS_KEYS.has(key) || isBuiltinStatusKey(key)) return;
+  const cleaned = sanitizeStatusText(typeof text === "string" ? text : String(text));
+  if (!cleaned) return;
+  const prev = merged.get(key);
+  merged.set(key, prev ? `${prev} · ${cleaned}` : cleaned);
+}
+
+export function collectExtensionStatuses(
+  footerData: FooterDataLike | null | undefined,
+  extra?: ReadonlyMap<string, string>,
+): ExtensionStatusItem[] {
+  const merged = new Map<string, string>();
   const map = footerData?.getExtensionStatuses?.();
-  if (!map) return [];
-  const out: ExtensionStatusItem[] = [];
-  for (const [key, text] of map.entries()) {
-    if (!key || OWN_STATUS_KEYS.has(key) || isBuiltinStatusKey(key)) continue;
-    const cleaned = sanitizeStatusText(typeof text === "string" ? text : String(text));
-    if (!cleaned) continue;
-    out.push({ key, text: cleaned });
-  }
-  return out;
+  if (map) for (const [key, text] of map.entries()) takeStatusItem(key, text, merged);
+  if (extra) for (const [key, text] of extra.entries()) takeStatusItem(key, text, merged);
+  return [...merged].map(([key, text]) => ({ key, text }));
 }
 
 export function listStatusBarKeys(
   footerData: FooterDataLike | null | undefined,
   statusBar: StatusBarDisplayConfig,
+  extra?: ReadonlyMap<string, string>,
 ): string[] {
   const seen = new Set<string>(BUILTIN_STATUS_KEYS);
   const out: string[] = [...BUILTIN_STATUS_KEYS];
@@ -72,10 +84,75 @@ export function listStatusBarKeys(
     seen.add(key);
     out.push(key);
   };
-  for (const item of collectExtensionStatuses(footerData)) add(item.key);
+  for (const item of collectExtensionStatuses(footerData, extra)) add(item.key);
   for (const side of STATUS_BAR_SIDES) for (const key of statusBar[side]) add(key);
   for (const key of statusBar.hidden) add(key);
   return out;
+}
+
+/** Hide native string widgets; factories pass through. */
+export function applyWidgetStatus(
+  map: Map<string, string>,
+  key: string,
+  content: unknown,
+): "hide" | "passthrough" {
+  if (!key || OWN_STATUS_KEYS.has(key)) return "passthrough";
+  if (typeof content === "function") {
+    map.delete(key);
+    return "passthrough";
+  }
+  if (content === undefined) {
+    map.delete(key);
+    return "hide";
+  }
+  if (!Array.isArray(content)) return "passthrough";
+  const text = content.map((line) => sanitizeStatusText(String(line))).filter(Boolean).join(" · ");
+  if (text) map.set(key, text);
+  else map.delete(key);
+  return "hide";
+}
+
+function collectNodeText(node: { text?: unknown; children?: unknown[] }, out: string[]): void {
+  if (typeof node?.text === "string") {
+    const cleaned = sanitizeStatusText(node.text);
+    if (cleaned) out.push(cleaned);
+  }
+  if (Array.isArray(node?.children)) {
+    for (const child of node.children) {
+      if (child && typeof child === "object") collectNodeText(child as { text?: unknown; children?: unknown[] }, out);
+    }
+  }
+}
+
+/** Global extensions run session_start before packages, so leftover widgets must be scraped then blanked.
+ * ponytail: blanks native widget containers (string + factory). Keep factory widgets if a live todo list must stay. */
+export function harvestAndBlankWidgetContainers(
+  tui: { children?: unknown[] } | null | undefined,
+  editor: unknown,
+  map: Map<string, string>,
+): void {
+  const children = tui?.children;
+  if (!Array.isArray(children) || editor == null) return;
+  const idx = children.findIndex((child) => {
+    if (child === editor) return true;
+    const nested = (child as { children?: unknown[] } | null)?.children;
+    return Array.isArray(nested) && nested.includes(editor);
+  });
+  if (idx < 0) return;
+  const pairs: Array<[unknown, string]> = [
+    [children[idx - 1], WIDGET_ABOVE_KEY],
+    [children[idx + 1], WIDGET_BELOW_KEY],
+  ];
+  for (const [node, key] of pairs) {
+    if (!node || typeof node !== "object") continue;
+    const container = node as { render?: (width: number) => string[]; children?: unknown[] };
+    if (typeof container.render !== "function") continue;
+    const texts: string[] = [];
+    collectNodeText(container, texts);
+    const text = texts.join(" · ");
+    if (text) map.set(key, text);
+    container.render = () => [];
+  }
 }
 
 export function resolveStatusBarLayout(

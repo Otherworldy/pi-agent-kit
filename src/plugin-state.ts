@@ -13,6 +13,7 @@ export interface PluginState {
   tuiRef: any | null;
   activeCtxRef: ExtensionContext | null;
   footerDataRef: FooterDataLike | null;
+  widgetStatuses: Map<string, string>;
 
   // 编辑器工厂
   originalEditorFactory: EditorFactory | undefined;
@@ -83,6 +84,7 @@ export function createPluginState(): PluginState {
     tuiRef: null,
     activeCtxRef: null,
     footerDataRef: null,
+    widgetStatuses: new Map(),
     originalEditorFactory: undefined,
     wrappedEditorFactory: undefined,
     activeThinkingLevel: "off",
@@ -211,6 +213,7 @@ export function resetPluginState(state: PluginState): void {
   state.lastWorkingElapsedMs = 0;
   state.tuiRef = null;
   state.footerDataRef = null;
+  state.widgetStatuses.clear();
   state.lastContinueFailure = null;
   state.pendingContinueRequest = null;
   state.tpsMeter.reset();
@@ -229,6 +232,7 @@ export function cleanupPluginState(state: PluginState): void {
   state.previousCompatProviderConfigs.clear();
   state.tuiRef = null;
   state.footerDataRef = null;
+  state.widgetStatuses.clear();
   state.activeCtxRef = null;
   state.currentModelRef = null;
   state.lastContinueFailure = null;
