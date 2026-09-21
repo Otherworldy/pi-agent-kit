@@ -532,15 +532,19 @@ function paintPanelLine(
   thinkingLevel: string,
   content: string,
   contentWidth: number,
-  borderColor?: (text: string) => string,
+  totalWidth: number,
+  borderColor: ((text: string) => string) | undefined,
+  indent: number,
 ): string {
   // borderColor = thinking rail, or green when Pi is in bash (!) mode.
   const bar = borderColor
     ? borderColor(LEFT_BAR)
     : fg(theme, thinkingColor(thinkingLevel || "off"), LEFT_BAR);
-  const pad = " ".repeat(PAD_X);
-  // ▌ | pad | content | pad — equal inset under solid panel bg; no ─ borders
-  return withPanelBg(theme, bar + pad + padLine(content, contentWidth) + pad);
+  const left = " ".repeat(indent);
+  const right = " ".repeat(Math.max(0, totalWidth - 1 - indent - contentWidth));
+  // ▌ | indent | content | right-fill — body lines pass indent=0 because the
+  // editor already renders its own paddingX inset.
+  return withPanelBg(theme, bar + left + padLine(content, contentWidth) + right);
 }
 
 function statusBarLines(
@@ -575,7 +579,8 @@ export function renderEditorChrome(input: EditorChromeRenderInput): string[] {
 
   const theme = input.context.ui?.theme;
   const thinkingLevel = input.thinkingLevel || "off";
-  const paint = (content: string) => paintPanelLine(theme, thinkingLevel, content, contentWidth, input.borderColor);
+  const paint = (content: string, indent = PAD_X) =>
+    paintPanelLine(theme, thinkingLevel, content, contentWidth, width, input.borderColor, indent);
   const topPad = Array.from({ length: BODY_TOP_PADDING }, () => paint(""));
   const metaGap = Array.from({ length: BODY_META_GAP }, () => paint(""));
   const bottomPad = Array.from({ length: PANEL_BOTTOM_PADDING }, () => paint(""));
@@ -596,7 +601,7 @@ export function renderEditorChrome(input: EditorChromeRenderInput): string[] {
     ...(top ? [top] : []),
     ...topPad,
     ...split.bodyLines.map((line) => {
-      const painted = paint(line);
+      const painted = paint(line, 0);
       return input.focused ? ensureCursorMarker(painted) : painted;
     }),
     ...metaGap,
